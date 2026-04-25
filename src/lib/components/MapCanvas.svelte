@@ -117,10 +117,10 @@
       type: 'line',
       source: 'zen-route',
       paint: {
-        'line-color': '#4FDBFF',
-        'line-width': 12,
-        'line-opacity': 0.18,
-        'line-blur': 10
+        'line-color': '#111827',
+        'line-width': 7,
+        'line-opacity': 0.08,
+        'line-blur': 6
       }
     });
 
@@ -129,20 +129,9 @@
       type: 'line',
       source: 'zen-route',
       paint: {
-        'line-color': '#8AE7FF',
+        'line-color': '#2563EB',
         'line-width': 3,
-        'line-opacity': 0.95,
-        'line-gradient': [
-          'interpolate',
-          ['linear'],
-          ['line-progress'],
-          0,
-          '#8AE7FF',
-          0.55,
-          '#3BA6FF',
-          1,
-          '#F9735B'
-        ]
+        'line-opacity': 0.82
       },
       layout: {
         'line-cap': 'round',
@@ -161,8 +150,8 @@
       map.easeTo({
         center: [139.6503, 35.6762],
         zoom: 4.2,
-        bearing: 18,
-        pitch: 52,
+        bearing: 0,
+        pitch: 26,
         duration: 900
       });
       return;
@@ -172,8 +161,8 @@
       map.flyTo({
         center: [nextPlaces[0].lng, nextPlaces[0].lat],
         zoom: 13.5,
-        bearing: 18,
-        pitch: 58,
+        bearing: 0,
+        pitch: 26,
         speed: 0.7,
         curve: 1.3
       });
@@ -196,8 +185,8 @@
         left: 64
       },
       maxZoom: 13.8,
-      bearing: 18,
-      pitch: 54,
+      bearing: 0,
+      pitch: 26,
       duration: 1100
     });
   }
@@ -213,11 +202,11 @@
 
       map = new imported.Map({
         container,
-        style: 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json',
+        style: 'https://tiles.stadiamaps.com/styles/alidade_smooth.json',
         center: [139.6503, 35.6762],
         zoom: 4.2,
-        pitch: 52,
-        bearing: 18,
+        pitch: 26,
+        bearing: 0,
         attributionControl: false,
         cooperativeGestures: true
       });
@@ -241,7 +230,7 @@
       map.on('load', () => {
         if (!map) return;
 
-        map.setPaintProperty('Water', 'fill-color', '#071628');
+        map.setPaintProperty('Water', 'fill-color', '#d8e5ed');
 
         fitMap(places);
       });
