@@ -3,7 +3,9 @@
   import MapCanvas from '$lib/components/MapCanvas.svelte';
   import { normalizeItinerary } from '$lib/itinerary';
   import { sampleCsv } from '$lib/sample-itinerary';
-  import type { ItineraryDay, PlaceCandidate, ResolvedPlace } from '$lib/types';
+  import type { ItineraryDay, ResolvedPlace } from '$lib/types';
+
+  type DetailPanel = 'status' | 'transit' | 'day' | 'notes' | 'csv' | null;
 
   const initialDays = normalizeCsv(sampleCsv);
 
@@ -16,6 +18,8 @@
   let copiedDayId = $state('');
   let resolvedByDay = $state<Record<string, ResolvedPlace[]>>({});
   let resolutionErrors = $state<Record<string, string>>({});
+  let activePanel = $state<DetailPanel>(null);
+  let expandedTimeline = $state<Record<string, boolean>>({});
 
   function normalizeCsv(text: string): ItineraryDay[] {
     const parsed = Papa.parse<Record<string, string>>(text, {
@@ -28,6 +32,7 @@
 
   let activeDay = $derived(days.find((day) => day.id === activeDayId) ?? days[0]);
   let activeResolvedPlaces = $derived(resolvedByDay[activeDay?.id ?? ''] ?? []);
+  let allStops = $derived([...(activeDay?.activities ?? []), ...(activeDay?.foods ?? [])]);
   let noteItems = $derived(
     (activeDay?.notes ?? '')
       .split(';')
@@ -99,6 +104,9 @@
 
   function selectDay(dayId: string) {
     activeDayId = dayId;
+    activePanel = null;
+    expandedTimeline = {};
+
     const nextDay = days.find((day) => day.id === dayId);
     if (nextDay) {
       void resolvePlaces(nextDay);
@@ -117,6 +125,8 @@
     activeDayId = parsedDays[0]?.id ?? '';
     resolvedByDay = {};
     resolutionErrors = {};
+    expandedTimeline = {};
+    activePanel = null;
     loadError = parsedDays.length ? '' : 'No itinerary rows found in that CSV.';
 
     if (parsedDays[0]) {
@@ -130,6 +140,8 @@
     activeDayId = parsedDays[0]?.id ?? '';
     resolvedByDay = {};
     resolutionErrors = {};
+    expandedTimeline = {};
+    activePanel = null;
     loadError = parsedDays.length ? '' : 'No itinerary rows found in the pasted CSV.';
 
     if (parsedDays[0]) {
@@ -145,6 +157,14 @@
         copiedDayId = '';
       }
     }, 1600);
+  }
+
+  function togglePanel(panel: Exclude<DetailPanel, null>) {
+    activePanel = activePanel === panel ? null : panel;
+  }
+
+  function toggleTimeline(itemId: string) {
+    expandedTimeline = { ...expandedTimeline, [itemId]: !expandedTimeline[itemId] };
   }
 
   function transportIcon(transport: string) {
@@ -175,8 +195,8 @@
     return 'Transit';
   }
 
-  function cardTone(kind: PlaceCandidate['kind']) {
-    return kind === 'food' ? 'border-[var(--line)] bg-white' : 'border-[var(--line)] bg-white';
+  function panelButtonClass(panel: Exclude<DetailPanel, null>) {
+    return `zen-map-chip ${activePanel === panel ? 'zen-map-chip--active' : ''}`;
   }
 
   $effect(() => {
@@ -195,243 +215,235 @@
 </svelte:head>
 
 <div class="zen-shell min-h-screen">
-  <div class="zen-page-frame mx-auto flex min-h-screen flex-col gap-5 px-4 py-4 lg:flex-row lg:px-5 lg:py-5">
-    <aside class="zen-column order-2 flex w-full flex-col gap-4 lg:order-1 lg:w-[24rem] lg:shrink-0">
-      <section class="zen-panel rounded-lg p-5">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-soft)]">
-              Zen
-            </p>
-            <h1 class="mt-3 text-[1.65rem] font-semibold leading-tight">
-              Japan itinerary planner
-            </h1>
-            <p class="mt-3 max-w-[28ch] text-[14px] leading-6 text-[var(--text-muted)]">
-              Import a CSV, switch days, and keep route details in one clean map view.
-            </p>
-          </div>
-          <div class="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-right">
-            <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-soft)]">Dataset</div>
-            <div class="mt-2 max-w-[9rem] truncate text-[12px] font-medium">
-              {uploadName}
+  <div class="zen-page-frame mx-auto grid min-h-screen gap-4 px-3 py-3 lg:grid-cols-[22rem_minmax(0,1fr)] lg:px-4 lg:py-4">
+    <aside class="zen-sidebar min-h-0 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
+      <section class="zen-panel flex h-full min-h-0 flex-col rounded-lg">
+        <div class="border-b border-[var(--line)] p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-soft)]">
+                Zen
+              </p>
+              <h1 class="mt-2 text-[1.3rem] font-semibold leading-tight">Japan itinerary planner</h1>
+              <p class="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">
+                Map-first day planning from a CSV itinerary.
+              </p>
+            </div>
+            <div class="shrink-0 rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-2.5 py-2 text-right">
+              <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">Days</div>
+              <div class="mt-1 text-[1rem] font-semibold">{days.length}</div>
             </div>
           </div>
-        </div>
 
-        <div class="mt-5 grid grid-cols-3 gap-3">
-          <div class="rounded-md border border-[var(--line)] bg-white px-3 py-3">
-            <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">Days</div>
-            <div class="mt-2 text-[1.1rem] font-semibold">{days.length}</div>
-          </div>
-          <div class="rounded-md border border-[var(--line)] bg-white px-3 py-3">
-            <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">Stops</div>
-            <div class="mt-2 text-[1.1rem] font-semibold">{activeDay?.activities.length ?? 0}</div>
-          </div>
-          <div class="rounded-md border border-[var(--line)] bg-white px-3 py-3">
-            <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">Foods</div>
-            <div class="mt-2 text-[1.1rem] font-semibold">{activeDay?.foods.length ?? 0}</div>
-          </div>
-        </div>
-
-        <div class="mt-5 grid gap-2">
-          <label
-            class="flex cursor-pointer items-center justify-between rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-4 py-3 text-[13px] font-semibold text-white transition hover:bg-black"
-          >
-            <span>Upload fresh CSV</span>
-            <span class="text-[11px] uppercase tracking-[0.14em] text-white/70">Local</span>
-            <input class="hidden" type="file" accept=".csv,text/csv" onchange={onUpload} />
-          </label>
-          <button
-            type="button"
-            class="rounded-md border border-[var(--line)] bg-white px-4 py-3 text-left text-[13px] font-medium transition hover:border-[var(--line-strong)]"
-            onclick={pasteCsv}
-          >
-            Rebuild from editor text
-          </button>
-        </div>
-      </section>
-
-      <section class="zen-panel rounded-lg p-4">
-        <div class="flex items-center justify-between px-1 pb-3">
-          <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
-            Days
-          </h2>
-          <span class="text-[11px] text-[var(--text-muted)]">{days.length} loaded</span>
-        </div>
-
-        <div class="grid max-h-[34vh] gap-2 overflow-auto pr-1 lg:max-h-[40vh]">
-          {#each days as day}
+          <div class="mt-4 flex gap-2">
+            <label
+              class="inline-flex flex-1 cursor-pointer items-center justify-center rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2.5 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)]"
+            >
+              Upload CSV
+              <input class="hidden" type="file" accept=".csv,text/csv" onchange={onUpload} />
+            </label>
             <button
               type="button"
-              class={`rounded-md border px-4 py-4 text-left transition ${
-                day.id === activeDay?.id
-                  ? 'border-[var(--line-strong)] bg-white shadow-sm'
-                  : 'border-[var(--line)] bg-transparent hover:bg-white'
-              }`}
-              onclick={() => selectDay(day.id)}
+              class="inline-flex items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2.5 text-[12px] font-semibold transition hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]"
+              onclick={() => togglePanel('csv')}
             >
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-[13px] font-semibold">{day.city}</span>
-                    <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                      {day.weekday}
-                    </span>
-                  </div>
-                  <div class="mt-2 text-[15px] font-medium leading-5">{day.theme}</div>
-                </div>
-                <div class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-muted)]">
-                  {day.dayNumber}
-                </div>
-              </div>
-              <div class="mt-3 flex items-center justify-between gap-4 text-[12px] text-[var(--text-muted)]">
-                <span>{day.date}</span>
-                <span>{day.activities.length + day.foods.length} pins</span>
-              </div>
+              CSV
             </button>
-          {/each}
-        </div>
-      </section>
-
-      <section class="zen-panel rounded-lg p-4">
-        <div class="flex items-center justify-between px-1">
-          <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
-            CSV
-          </h2>
-          <span class="text-[11px] text-[var(--text-muted)]">Paste and tune</span>
+          </div>
+          <div class="mt-3 max-w-full truncate text-[11px] text-[var(--text-muted)]">{uploadName}</div>
         </div>
 
-        <textarea
-          bind:value={rawCsv}
-          class="zen-code mt-4 h-[17rem] w-full rounded-md border border-[var(--line)] bg-white px-4 py-4 text-[12px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-soft)]"
-        ></textarea>
+        <div class="flex min-h-0 flex-1 flex-col p-3">
+          <div class="flex items-center justify-between px-1 pb-2">
+            <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
+              Days
+            </h2>
+            <span class="text-[11px] text-[var(--text-muted)]">{activeDay?.city ?? 'No day'}</span>
+          </div>
 
-        {#if loadError}
-          <p class="mt-3 text-[12px] text-[var(--accent-coral)]">{loadError}</p>
-        {/if}
+          <div class="grid min-h-0 flex-1 gap-1.5 overflow-auto pr-1">
+            {#each days as day}
+              <button
+                type="button"
+                class={`rounded-md border px-3 py-3 text-left transition ${
+                  day.id === activeDay?.id
+                    ? 'border-[var(--line-strong)] bg-[var(--panel-strong)] shadow-sm'
+                    : 'border-transparent bg-transparent hover:border-[var(--line)] hover:bg-[var(--panel-strong)]'
+                }`}
+                onclick={() => selectDay(day.id)}
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span class="shrink-0 text-[12px] font-semibold">Day {day.dayNumber}</span>
+                      <span class="truncate text-[11px] uppercase tracking-[0.12em] text-[var(--text-soft)]">
+                        {day.weekday}
+                      </span>
+                    </div>
+                    <div class="mt-1 truncate text-[14px] font-semibold">{day.city}</div>
+                  </div>
+                  <div class="shrink-0 text-[11px] text-[var(--text-muted)]">
+                    {day.activities.length + day.foods.length}
+                  </div>
+                </div>
+                <div class="mt-2 line-clamp-2 text-[12px] leading-5 text-[var(--text-muted)]">
+                  {day.theme}
+                </div>
+              </button>
+            {/each}
+          </div>
+        </div>
       </section>
     </aside>
 
-    <main class="zen-column order-1 flex min-h-screen w-full flex-1 flex-col gap-4 overflow-hidden lg:order-2">
+    <main class="flex min-w-0 flex-col gap-4">
       {#if activeDay}
-        <section class="zen-panel relative min-h-[60vh] overflow-hidden rounded-lg">
+        <section class="zen-map-stage relative min-h-[72vh] overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--bg-2)] shadow-[var(--shadow-panel)] lg:min-h-[calc(100vh-2rem)]">
           <div class="absolute inset-0">
             <MapCanvas places={activeResolvedPlaces} />
           </div>
 
-          <div class="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(247,247,244,0.82)_0%,rgba(247,247,244,0.16)_30%,rgba(247,247,244,0.12)_62%,rgba(247,247,244,0.88)_100%)]"></div>
+          <div class="pointer-events-none absolute inset-x-0 top-0 h-36 bg-[linear-gradient(180deg,rgba(247,247,244,0.9),rgba(247,247,244,0))]"></div>
 
-          <div class="relative flex h-full min-h-[60vh] flex-col justify-between p-4 sm:p-6">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div class="max-w-[46rem]">
-                <div class="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-white/80 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+          <div class="pointer-events-none absolute left-3 right-3 top-3 z-10 flex flex-col gap-3 sm:left-4 sm:right-4">
+            <div class="pointer-events-auto flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div class="zen-map-title max-w-full rounded-lg border border-[var(--line)] bg-[var(--panel-strong)]/90 px-4 py-3 shadow-[var(--shadow-panel)] backdrop-blur">
+                <div class="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
                   <span>Day {activeDay.dayNumber}</span>
-                  <span class="text-[var(--text-soft)]">/</span>
                   <span>{activeDay.date}</span>
+                  <span>{activeDay.weekday}</span>
                 </div>
-                <h2 class="mt-4 max-w-[12ch] text-[2.35rem] font-semibold leading-none sm:text-[3rem]">
-                  {activeDay.city}
-                </h2>
-                <p class="mt-3 max-w-[40rem] text-[1.05rem] leading-7 text-[var(--text-main)]">
-                  {activeDay.theme}
-                </p>
-                <p class="mt-4 max-w-[42rem] text-[14px] leading-6 text-[var(--text-muted)]">
-                  {activeDay.comments}
-                </p>
-              </div>
-
-              <div class="grid gap-3 self-start lg:min-w-[18rem]">
-                <div class="zen-panel-soft rounded-md px-4 py-3">
-                  <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                    Status
-                  </div>
-                  <div class="mt-2 text-[14px] font-medium">{mapStatus}</div>
-                </div>
-                <div class="zen-panel-soft rounded-md px-4 py-3">
-                  <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                    Transit
-                  </div>
-                  <div class="mt-2 text-[14px] font-medium">
-                    {transportLabel(activeDay.transportation)} · {activeDay.transportation}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid min-w-0 gap-3 lg:grid-cols-[1.15fr_0.85fr]">
-              <div class="zen-panel-soft rounded-md p-4">
-                <div class="flex min-w-0 flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                      Active day
-                    </div>
-                    <div class="mt-2 text-[1.15rem] font-semibold">
-                      {activeDay.activities.length} stops, {activeDay.foods.length} food anchors
-                    </div>
-                  </div>
-                  <div class="shrink-0 rounded-md border border-[var(--line)] bg-white px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                    {isLoadingMap ? 'Resolving' : `${activeResolvedPlaces.length} mapped`}
-                  </div>
-                </div>
-                <div class="mt-4 flex flex-wrap gap-2">
-                  {#each activeDay.activities.slice(0, 4) as item}
-                    <div class="max-w-full rounded-md border border-[var(--line)] bg-white px-3 py-1.5 text-[12px] text-[var(--text-muted)] break-words">
-                      {item.order}. {item.label}
-                    </div>
-                  {/each}
+                <div class="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
+                  <h2 class="text-[1.65rem] font-semibold leading-none">{activeDay.city}</h2>
+                  <p class="max-w-[48rem] text-[13px] leading-5 text-[var(--text-muted)]">{activeDay.theme}</p>
                 </div>
               </div>
 
-              <div class="zen-panel-soft rounded-md p-4">
-                <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class={panelButtonClass('status')} onclick={() => togglePanel('status')}>
+                  Status
+                </button>
+                <button type="button" class={panelButtonClass('transit')} onclick={() => togglePanel('transit')}>
+                  Transit
+                </button>
+                <button type="button" class={panelButtonClass('day')} onclick={() => togglePanel('day')}>
+                  Active Day
+                </button>
+                <button type="button" class={panelButtonClass('notes')} onclick={() => togglePanel('notes')}>
                   Notes
-                </div>
-                <div class="mt-3 grid gap-2">
-                  {#each noteItems.slice(0, 3) as note}
-                    <div class="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                      {note}
-                    </div>
-                  {/each}
-                </div>
+                </button>
               </div>
             </div>
+
+            {#if activePanel}
+              <div class="pointer-events-auto w-full max-w-[27rem] rounded-lg border border-[var(--line)] bg-[var(--panel-strong)]/95 p-4 shadow-[var(--shadow-panel)] backdrop-blur xl:ml-auto">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
+                      {activePanel}
+                    </div>
+                    {#if activePanel === 'status'}
+                      <p class="mt-2 text-[14px] font-medium leading-6">{mapStatus}</p>
+                      <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
+                        {isLoadingMap ? 'Resolving places now.' : `${activeResolvedPlaces.length} mapped of ${allStops.length} itinerary items.`}
+                      </p>
+                    {:else if activePanel === 'transit'}
+                      <p class="mt-2 text-[14px] font-semibold">{transportLabel(activeDay.transportation)}</p>
+                      <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{activeDay.transportation}</p>
+                    {:else if activePanel === 'day'}
+                      <p class="mt-2 text-[14px] font-semibold">
+                        {activeDay.activities.length} stops, {activeDay.foods.length} food anchors
+                      </p>
+                      <div class="mt-3 flex flex-wrap gap-2">
+                        {#each activeDay.activities.slice(0, 5) as item}
+                          <span class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-2.5 py-1 text-[12px] text-[var(--text-muted)]">
+                            {item.order}. {item.label}
+                          </span>
+                        {/each}
+                      </div>
+                    {:else if activePanel === 'notes'}
+                      <div class="mt-3 grid gap-2">
+                        {#each noteItems as note}
+                          <div class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
+                            {note}
+                          </div>
+                        {/each}
+                      </div>
+                    {:else if activePanel === 'csv'}
+                      <textarea
+                        bind:value={rawCsv}
+                        class="zen-code mt-3 h-[18rem] w-full rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-3 text-[12px] leading-6 text-[var(--text-main)]"
+                      ></textarea>
+                      <button
+                        type="button"
+                        class="mt-3 rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)]"
+                        onclick={pasteCsv}
+                      >
+                        Rebuild itinerary
+                      </button>
+                      {#if loadError}
+                        <p class="mt-3 text-[12px] text-[var(--accent-coral)]">{loadError}</p>
+                      {/if}
+                    {/if}
+                  </div>
+                  <button
+                    type="button"
+                    class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-[var(--line)] bg-[var(--panel-strong)] text-[14px] font-semibold transition hover:bg-[var(--bg-0)]"
+                    aria-label="Close panel"
+                    onclick={() => (activePanel = null)}
+                  >
+                    x
+                  </button>
+                </div>
+              </div>
+            {/if}
           </div>
         </section>
 
-        <section class="grid gap-4 xl:grid-cols-[1.05fr_0.85fr_0.85fr]">
+        <section class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
           <article class="zen-panel rounded-lg p-4">
             <div class="flex items-center justify-between border-b border-[var(--line)] px-1 pb-3">
               <h3 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
                 Timeline
               </h3>
-              <span class="text-[11px] text-[var(--text-muted)]">Map route + sequence</span>
+              <span class="text-[11px] text-[var(--text-muted)]">{activeDay.activities.length} stops</span>
             </div>
 
-            <div class="mt-4 grid gap-3">
+            <div class="mt-3 grid gap-1.5">
               {#each activeDay.activities as item}
-                <div class={`rounded-md border p-4 shadow-sm ${cardTone(item.kind)}`}>
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                        Stop {item.order}
-                      </div>
-                      <div class="mt-2 text-[1rem] font-semibold">{item.label}</div>
-                      <div class="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">{item.query}</div>
-                    </div>
-                    <div class="grid h-9 w-9 place-items-center rounded-full border border-[var(--line)] bg-[var(--bg-0)] text-[13px] font-semibold text-[var(--text-muted)]">
+                <div class="rounded-md border border-[var(--line)] bg-[var(--panel-strong)]">
+                  <button
+                    type="button"
+                    class="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition hover:bg-[var(--bg-0)]"
+                    onclick={() => toggleTimeline(item.id)}
+                    aria-expanded={expandedTimeline[item.id] ? 'true' : 'false'}
+                  >
+                    <span class="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--line)] bg-[var(--bg-0)] text-[12px] font-semibold text-[var(--text-muted)]">
                       {item.order}
-                    </div>
-                  </div>
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate text-[14px] font-semibold">{item.label}</span>
+                      <span class="block truncate text-[12px] text-[var(--text-muted)]">{item.query}</span>
+                    </span>
+                    <span class="text-[13px] font-semibold text-[var(--text-soft)]">
+                      {expandedTimeline[item.id] ? '-' : '+'}
+                    </span>
+                  </button>
 
-                  {#if item.sourceUrl}
-                    <a
-                      class="mt-4 inline-flex rounded-md border border-[var(--line)] bg-white px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--line-strong)]"
-                      href={item.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open source map link
-                    </a>
+                  {#if expandedTimeline[item.id]}
+                    <div class="border-t border-[var(--line)] px-3 py-3">
+                      <p class="text-[12px] leading-5 text-[var(--text-muted)]">{item.query}</p>
+                      {#if item.sourceUrl}
+                        <a
+                          class="mt-3 inline-flex rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]"
+                          href={item.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open source map link
+                        </a>
+                      {/if}
+                    </div>
                   {/if}
                 </div>
               {/each}
@@ -441,80 +453,39 @@
           <article class="zen-panel rounded-lg p-4">
             <div class="flex items-center justify-between border-b border-[var(--line)] px-1 pb-3">
               <h3 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
-                Food
-              </h3>
-              <span class="text-[11px] text-[var(--text-muted)]">Food markers</span>
-            </div>
-
-            <div class="mt-4 grid gap-3">
-              {#each activeDay.foods as item}
-                <div class="rounded-md border border-[var(--line)] bg-white p-4 shadow-sm">
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                        Food
-                      </div>
-                      <div class="mt-2 text-[1rem] font-semibold">{item.label}</div>
-                      <div class="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">{item.query}</div>
-                    </div>
-                    <div class="grid h-9 w-9 place-items-center rounded-full border border-[var(--line)] bg-[var(--bg-0)] text-[14px] font-semibold text-[var(--text-muted)]">
-                      +
-                    </div>
-                  </div>
-
-                  {#if item.sourceUrl}
-                    <a
-                      class="mt-4 inline-flex rounded-md border border-[var(--line)] bg-white px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--line-strong)]"
-                      href={item.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open source map link
-                    </a>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          </article>
-
-          <article class="zen-panel rounded-lg p-4">
-            <div class="flex items-center justify-between border-b border-[var(--line)] px-1 pb-3">
-              <h3 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
-                Cheat Sheet
+                Food + Phrases
               </h3>
               <button
                 type="button"
-                class="rounded-md border border-[var(--line-strong)] bg-white px-3 py-1.5 text-[11px] font-semibold text-[var(--text-main)] transition hover:bg-[var(--bg-0)]"
+                class="rounded-md border border-[var(--line-strong)] bg-[var(--panel-strong)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-main)] transition hover:bg-[var(--bg-0)]"
                 onclick={() => copyPhrases(activeDay.phrases)}
               >
                 {copiedDayId === activeDay.id ? 'Copied' : 'Copy'}
               </button>
             </div>
 
-            <div class="mt-4 rounded-md border border-[var(--line)] bg-white p-4">
-              <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                Essential Japanese
-              </div>
-              <div class="mt-4 grid gap-2">
-                {#each activeDay.phrases as phrase}
-                  <div class="zen-code rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-3 text-[13px]">
-                    {phrase}
+            <div class="mt-3 grid gap-2">
+              {#each activeDay.foods as item}
+                <div class="rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2.5">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="truncate text-[14px] font-semibold">{item.label}</div>
+                      <div class="mt-1 truncate text-[12px] text-[var(--text-muted)]">{item.query}</div>
+                    </div>
+                    <span class="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--line)] bg-[var(--bg-0)] text-[13px] font-semibold text-[var(--text-muted)]">
+                      +
+                    </span>
                   </div>
-                {/each}
-              </div>
+                </div>
+              {/each}
             </div>
 
-            <div class="mt-4 rounded-md border border-[var(--line)] bg-white p-4">
-              <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                Booking / Ops
-              </div>
-              <div class="mt-4 grid gap-2">
-                {#each noteItems as note}
-                  <div class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-muted)]">
-                    {note}
-                  </div>
-                {/each}
-              </div>
+            <div class="mt-4 grid gap-2">
+              {#each activeDay.phrases as phrase}
+                <div class="zen-code rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2.5 text-[12px]">
+                  {phrase}
+                </div>
+              {/each}
             </div>
           </article>
         </section>

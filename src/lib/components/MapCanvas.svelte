@@ -208,7 +208,13 @@
         pitch: 26,
         bearing: 0,
         attributionControl: false,
-        cooperativeGestures: true
+        cooperativeGestures: false,
+        dragPan: true,
+        scrollZoom: true,
+        boxZoom: true,
+        doubleClickZoom: true,
+        keyboard: true,
+        touchZoomRotate: true
       });
 
       map.addControl(
@@ -224,7 +230,16 @@
           showCompass: true,
           showZoom: true
         }),
-        'bottom-right'
+        'top-right'
+      );
+
+      map.addControl(new imported.FullscreenControl(), 'top-right');
+      map.addControl(
+        new imported.ScaleControl({
+          maxWidth: 110,
+          unit: 'metric'
+        }),
+        'bottom-left'
       );
 
       map.on('load', () => {
