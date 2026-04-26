@@ -48,9 +48,7 @@
 
   function markerGlyph(place: ResolvedPlace): string {
     if (place.kind === 'food') return '+';
-    if (place.kind === 'transit') return 'T';
-    if (place.kind === 'comment') return 'C';
-    if (place.kind === 'booking') return 'B';
+    if (place.kind === 'hotel') return 'H';
 
     return String(place.order);
   }

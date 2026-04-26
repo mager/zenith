@@ -222,16 +222,8 @@ input[type='file'] {
   background: var(--accent-coral);
 }
 
-.zen-marker--transit {
+.zen-marker--hotel {
   background: var(--accent-green);
-}
-
-.zen-marker--comment {
-  background: var(--accent-gold);
-}
-
-.zen-marker--booking {
-  background: var(--accent-plum);
 }
 
 .zen-marker--active {
@@ -362,16 +354,8 @@ input[type='file'] {
   background: var(--accent-coral);
 }
 
-.zen-source-dot--transit {
+.zen-source-dot--hotel {
   background: var(--accent-green);
-}
-
-.zen-source-dot--comment {
-  background: var(--accent-gold);
-}
-
-.zen-source-dot--booking {
-  background: var(--accent-plum);
 }
 
 .zen-resolve-dot {
@@ -413,6 +397,43 @@ input[type='file'] {
 
 .zen-source-band {
   box-shadow: 0 1px 0 rgba(24, 28, 33, 0.03);
+}
+
+.zen-day-row {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.75rem;
+  text-align: left;
+  transition:
+    background 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.zen-day-row:hover {
+  background: var(--panel-strong);
+  border-color: var(--line);
+  transform: translateY(-1px);
+}
+
+.zen-day-row--active {
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+  box-shadow: 0 1px 0 rgba(24, 28, 33, 0.04);
+}
+
+.zen-stay-link {
+  transition:
+    background 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.zen-stay-link:hover {
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
 }
 
 .zen-shell button,

@@ -23,22 +23,12 @@ type PlaceDraft = Omit<PlaceCandidate, 'id' | 'order'> & {
 };
 
 const LIST_SPLIT = /\s*[,;]\s*/;
-const NARRATIVE_SPLIT = /(?<=[.!?])\s+|;+|\n+/;
-
-const SOURCE_ORDER: PlaceSource[] = [
-  'Ideas',
-  'Must Eats',
-  'Transportation',
-  'Comments',
-  'Notes/Bookings'
-];
+const SOURCE_ORDER: PlaceSource[] = ['Ideas', 'Must Eats', 'Hotel'];
 
 const SOURCE_KIND: Record<PlaceSource, PlaceKind> = {
   Ideas: 'idea',
   'Must Eats': 'food',
-  Transportation: 'transit',
-  Comments: 'comment',
-  'Notes/Bookings': 'booking'
+  Hotel: 'hotel'
 };
 
 const KNOWN_PLACES: KnownPlace[] = [
@@ -178,6 +168,48 @@ const KNOWN_PLACES: KnownPlace[] = [
     aliases: ['chanko nabe'],
     detail: 'Food search anchored to the sumo district.',
     confidence: 'area'
+  },
+  {
+    canonicalKey: 'kimpton-shinjuku',
+    label: 'Kimpton Shinjuku Tokyo',
+    query: 'Kimpton Shinjuku Tokyo, Tokyo, Japan',
+    aliases: ['kimpton shinjuku tokyo']
+  },
+  {
+    canonicalKey: 'hotel-indigo-hakone-gora',
+    label: 'Hotel Indigo Hakone Gora',
+    query: 'Hotel Indigo Hakone Gora, Hakone, Japan',
+    aliases: ['hotel indigo hakone gora']
+  },
+  {
+    canonicalKey: 'hilton-kyoto',
+    label: 'Hilton Kyoto',
+    query: 'Hilton Kyoto, Kyoto, Japan',
+    aliases: ['hilton kyoto']
+  },
+  {
+    canonicalKey: 'ryotei-rangetsu',
+    label: 'Ryotei Rangetsu',
+    query: 'Ryotei Rangetsu, Arashiyama, Kyoto, Japan',
+    aliases: ['ryotei rangetsu', 'rangetsu']
+  },
+  {
+    canonicalKey: 'intercontinental-osaka',
+    label: 'InterContinental Osaka',
+    query: 'InterContinental Osaka, Osaka, Japan',
+    aliases: ['intercontinental osaka']
+  },
+  {
+    canonicalKey: 'ana-intercontinental-ishigaki',
+    label: 'ANA InterContinental Ishigaki',
+    query: 'ANA InterContinental Ishigaki Resort, Ishigaki, Japan',
+    aliases: ['ana intercontinental ishigaki', 'ana intercontinental ishigaki resort']
+  },
+  {
+    canonicalKey: 'intercontinental-tokyo-bay',
+    label: 'InterContinental Tokyo Bay',
+    query: 'InterContinental Tokyo Bay, Tokyo, Japan',
+    aliases: ['intercontinental tokyo bay']
   }
 ];
 
@@ -199,13 +231,6 @@ function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-function splitNarrative(value: string): string[] {
-  return value
-    .split(NARRATIVE_SPLIT)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function cleanLabel(value: string): string {
   return stripUrls(value)
     .replace(/\s*\((?:if adding|if interested|local specialty|sumo stew|fills up on weekends)\)\s*/gi, ' ')
@@ -222,6 +247,7 @@ function isGenericTask(value: string): boolean {
 
   return [
     /^land$/i,
+    /^n\/?a$/i,
     /^local trains?$/i,
     /^travel from\b/i,
     /^favorite beach repeat$/i,
@@ -234,8 +260,7 @@ function isGenericTask(value: string): boolean {
     /visibility forecast/i,
     /etiquette rules/i,
     /opening times/i,
-    /^book\b/i,
-    /\btickets?\b/i
+    /^book\b/i
   ].some((pattern) => pattern.test(value)) || normalized.trim().length < 3;
 }
 
@@ -366,28 +391,23 @@ function parseColumn(row: CsvRow, source: PlaceSource): PlaceDraft[] {
   const rawValue = row[source]?.trim() ?? '';
   if (!rawValue) return [];
 
-  const chunks =
-    source === 'Comments' || source === 'Notes/Bookings' ? splitNarrative(rawValue) : splitList(rawValue);
+  const chunks = splitList(rawValue);
 
   return chunks.flatMap((chunk) => {
     const known = findKnownPlaces(chunk).map((place) => knownDraft(place, source, chunk));
     if (known.length) return known;
 
-    if (source === 'Ideas' || source === 'Must Eats') {
-      const draft = directDraft(row, chunk, source, chunk);
-      return draft ? [draft] : [];
-    }
-
-    return [];
+    const draft = directDraft(row, chunk, source, chunk);
+    return draft ? [draft] : [];
   });
 }
 
 function parsePlaces(row: CsvRow): PlaceCandidate[] {
   const drafts = SOURCE_ORDER.flatMap((source) => parseColumn(row, source));
-  const rowText = `${row.Ideas ?? ''} ${row.Transportation ?? ''} ${row.Comments ?? ''}`;
+  const rowText = `${row.Ideas ?? ''} ${row.Comments ?? ''}`;
 
   if (/landing|land/i.test(rowText) && /narita/i.test(rowText)) {
-    drafts.unshift(knownDraft(KNOWN_PLACES[0], 'Transportation', 'Landing via Narita context'));
+    drafts.unshift(knownDraft(KNOWN_PLACES[0], 'Ideas', 'Landing via Narita context'));
   }
 
   return mergeDrafts(drafts);
@@ -399,9 +419,10 @@ function parsePhrases(row: CsvRow): string[] {
 
 export function normalizeItinerary(rows: CsvRow[]): ItineraryDay[] {
   return rows
-    .filter((row) => (row.D ?? row.Day ?? '').trim())
+    .filter((row) => (row.D ?? row.Date ?? row.Day ?? '').trim())
     .map((row, index) => {
-      const dayNumber = Number(row.D ?? index + 1);
+      const parsedDayNumber = Number(row.D);
+      const dayNumber = Number.isFinite(parsedDayNumber) && parsedDayNumber > 0 ? parsedDayNumber : index + 1;
       const places = parsePlaces(row);
 
       return {
@@ -418,9 +439,8 @@ export function normalizeItinerary(rows: CsvRow[]): ItineraryDay[] {
         places,
         activities: places.filter((place) => place.kind === 'idea'),
         foods: places.filter((place) => place.kind === 'food'),
-        transitPlaces: places.filter((place) => place.kind === 'transit'),
-        commentPlaces: places.filter((place) => place.kind === 'comment'),
-        bookingPlaces: places.filter((place) => place.kind === 'booking')
+        hotel: row.Hotel?.trim() || '',
+        hotelPlaces: places.filter((place) => place.kind === 'hotel')
       };
     });
 }

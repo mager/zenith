@@ -119,6 +119,41 @@ const CURATED_PLACES: Record<string, Omit<NonNullable<ResolveResponse>, 'source'
     lat: 35.696741,
     lng: 139.792091,
     resolvedLabel: 'Ryogoku chanko-nabe area'
+  },
+  'kimpton-shinjuku': {
+    lat: 35.68556,
+    lng: 139.692286,
+    resolvedLabel: 'Kimpton Shinjuku Tokyo'
+  },
+  'hotel-indigo-hakone-gora': {
+    lat: 35.252675,
+    lng: 139.050497,
+    resolvedLabel: 'Hotel Indigo Hakone Gora'
+  },
+  'hilton-kyoto': {
+    lat: 35.009989,
+    lng: 135.769486,
+    resolvedLabel: 'Hilton Kyoto'
+  },
+  'ryotei-rangetsu': {
+    lat: 35.013035,
+    lng: 135.676617,
+    resolvedLabel: 'Ryotei Rangetsu, Arashiyama'
+  },
+  'intercontinental-osaka': {
+    lat: 34.706525,
+    lng: 135.494557,
+    resolvedLabel: 'InterContinental Osaka'
+  },
+  'ana-intercontinental-ishigaki': {
+    lat: 24.334208,
+    lng: 124.185055,
+    resolvedLabel: 'ANA InterContinental Ishigaki Resort'
+  },
+  'intercontinental-tokyo-bay': {
+    lat: 35.653057,
+    lng: 139.762218,
+    resolvedLabel: 'InterContinental Tokyo Bay'
   }
 };
 

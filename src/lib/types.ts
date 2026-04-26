@@ -1,5 +1,5 @@
-export type PlaceKind = 'idea' | 'food' | 'transit' | 'comment' | 'booking';
-export type PlaceSource = 'Ideas' | 'Must Eats' | 'Transportation' | 'Comments' | 'Notes/Bookings';
+export type PlaceKind = 'idea' | 'food' | 'hotel';
+export type PlaceSource = 'Ideas' | 'Must Eats' | 'Hotel';
 export type PlaceConfidence = 'named' | 'inferred' | 'area' | 'search';
 export type PlaceResolutionSource = 'curated' | 'google-link' | 'photon' | 'nominatim';
 
@@ -38,7 +38,6 @@ export type ItineraryDay = {
   places: PlaceCandidate[];
   activities: PlaceCandidate[];
   foods: PlaceCandidate[];
-  transitPlaces: PlaceCandidate[];
-  commentPlaces: PlaceCandidate[];
-  bookingPlaces: PlaceCandidate[];
+  hotel: string;
+  hotelPlaces: PlaceCandidate[];
 };
