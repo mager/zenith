@@ -1,25 +1,27 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 @import 'maplibre-gl/dist/maplibre-gl.css';
 
 :root {
   color-scheme: light;
-  --bg-0: oklch(0.973 0.008 95);
-  --bg-1: oklch(0.94 0.009 95);
-  --bg-2: oklch(0.89 0.012 95);
-  --panel: oklch(0.99 0.006 95 / 0.9);
-  --panel-strong: oklch(0.99 0.006 95);
-  --panel-soft: oklch(0.99 0.006 95 / 0.78);
+  --bg-0: oklch(0.972 0.007 128);
+  --bg-1: oklch(0.935 0.012 132);
+  --bg-2: oklch(0.88 0.016 206);
+  --panel: oklch(0.988 0.006 128 / 0.9);
+  --panel-strong: oklch(0.988 0.006 128);
+  --panel-soft: oklch(0.988 0.006 128 / 0.78);
   --line: rgba(30, 35, 40, 0.1);
   --line-strong: rgba(30, 35, 40, 0.24);
   --text-main: oklch(0.22 0.012 255);
   --text-muted: oklch(0.48 0.018 255);
   --text-soft: oklch(0.63 0.014 255);
   --ink-hover: oklch(0.29 0.014 255);
-  --accent-cyan: oklch(0.52 0.2 262);
-  --accent-blue: oklch(0.52 0.2 262);
-  --accent-coral: oklch(0.49 0.13 55);
-  --accent-gold: oklch(0.43 0.12 55);
+  --accent-cyan: oklch(0.52 0.14 213);
+  --accent-blue: oklch(0.48 0.16 261);
+  --accent-coral: oklch(0.57 0.14 32);
+  --accent-gold: oklch(0.64 0.13 92);
+  --accent-green: oklch(0.55 0.11 150);
+  --accent-plum: oklch(0.45 0.12 320);
   --shadow-panel: 0 1px 2px rgba(24, 28, 33, 0.05), 0 12px 30px rgba(24, 28, 33, 0.06);
 }
 
@@ -44,7 +46,7 @@ body {
   margin: 0;
   color: var(--text-main);
   font-family:
-    'Space Grotesk', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 button,
@@ -118,7 +120,7 @@ input[type='file'] {
 .maplibregl-map {
   height: 100%;
   width: 100%;
-  background: oklch(0.94 0.012 95);
+  background: oklch(0.935 0.012 132);
   cursor: grab;
 }
 
@@ -212,12 +214,32 @@ input[type='file'] {
   box-shadow: 0 10px 22px rgba(24, 28, 33, 0.2);
 }
 
-.zen-marker--activity {
+.zen-marker--idea {
   background: var(--accent-blue);
 }
 
 .zen-marker--food {
   background: var(--accent-coral);
+}
+
+.zen-marker--transit {
+  background: var(--accent-green);
+}
+
+.zen-marker--comment {
+  background: var(--accent-gold);
+}
+
+.zen-marker--booking {
+  background: var(--accent-plum);
+}
+
+.zen-marker--active {
+  transform: translateY(-2px) scale(1.08);
+  border-color: color-mix(in oklch, var(--panel-strong) 74%, transparent);
+  box-shadow:
+    0 0 0 5px color-mix(in oklch, var(--accent-blue) 16%, transparent),
+    0 12px 28px rgba(24, 28, 33, 0.24);
 }
 
 .zen-marker__glyph {
@@ -233,6 +255,14 @@ input[type='file'] {
 
 .zen-map-stage {
   isolation: isolate;
+}
+
+.zen-map-fade--top {
+  background: linear-gradient(180deg, oklch(0.972 0.007 128 / 0.92), oklch(0.972 0.007 128 / 0));
+}
+
+.zen-map-fade--bottom {
+  background: linear-gradient(0deg, oklch(0.972 0.007 128 / 0.9), oklch(0.972 0.007 128 / 0));
 }
 
 .zen-map-title {
@@ -267,6 +297,122 @@ input[type='file'] {
   border-color: var(--line-strong);
   background: var(--text-main);
   color: var(--panel-strong);
+}
+
+.zen-place-rail {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(30, 35, 40, 0.24) transparent;
+}
+
+.zen-place-pill {
+  align-items: center;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-main);
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.45rem;
+  max-width: 18rem;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.zen-place-pill:hover,
+.zen-place-pill--active {
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.zen-place-pill__order {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  min-width: 1.1rem;
+}
+
+.zen-place-pill__text {
+  font-size: 0.78rem;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-source-dot {
+  border: 1px solid rgba(23, 26, 31, 0.14);
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 0.72rem;
+  width: 0.72rem;
+}
+
+.zen-source-dot--idea {
+  background: var(--accent-blue);
+}
+
+.zen-source-dot--food {
+  background: var(--accent-coral);
+}
+
+.zen-source-dot--transit {
+  background: var(--accent-green);
+}
+
+.zen-source-dot--comment {
+  background: var(--accent-gold);
+}
+
+.zen-source-dot--booking {
+  background: var(--accent-plum);
+}
+
+.zen-resolve-dot {
+  background: var(--line-strong);
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 0.42rem;
+  width: 0.42rem;
+}
+
+.zen-resolve-dot--live {
+  background: var(--accent-green);
+}
+
+.zen-source-place {
+  align-items: center;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-main);
+  display: inline-flex;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.zen-source-place:hover,
+.zen-source-place--active {
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.zen-source-band {
+  box-shadow: 0 1px 0 rgba(24, 28, 33, 0.03);
 }
 
 .zen-shell button,

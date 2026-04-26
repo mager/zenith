@@ -12,12 +12,21 @@
 
   type MapLibreModule = typeof import('maplibre-gl');
 
-  let { places = [] }: { places: ResolvedPlace[] } = $props();
+  let {
+    places = [],
+    activePlaceId = '',
+    onSelectPlace
+  }: {
+    places: ResolvedPlace[];
+    activePlaceId?: string;
+    onSelectPlace?: (placeId: string) => void;
+  } = $props();
 
   let container: HTMLDivElement;
   let map: MapLibreMap | null = null;
   let maplibre: MapLibreModule | null = null;
   let markers: Marker[] = [];
+  let markerElements = new Map<string, HTMLElement>();
 
   function clearMarkers() {
     for (const marker of markers) {
@@ -25,16 +34,43 @@
     }
 
     markers = [];
+    markerElements = new Map();
+  }
+
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function markerGlyph(place: ResolvedPlace): string {
+    if (place.kind === 'food') return '+';
+    if (place.kind === 'transit') return 'T';
+    if (place.kind === 'comment') return 'C';
+    if (place.kind === 'booking') return 'B';
+
+    return String(place.order);
+  }
+
+  function updateActiveMarker() {
+    for (const [placeId, element] of markerElements) {
+      element.classList.toggle('zen-marker--active', placeId === activePlaceId);
+    }
   }
 
   function popupMarkup(place: ResolvedPlace): string {
-    const badge = place.kind === 'food' ? 'Must Eat' : `Stop ${place.order}`;
-    const meta = place.resolvedLabel ? `<p class="zen-popup-meta">${place.resolvedLabel}</p>` : '';
+    const badge = place.sourceColumns[0] ?? 'Place';
+    const meta = place.resolvedLabel
+      ? `<p class="zen-popup-meta">${escapeHtml(place.resolvedLabel)}</p>`
+      : '';
 
     return `
       <div class="zen-popup">
-        <div class="zen-popup-badge">${badge}</div>
-        <div class="zen-popup-title">${place.label}</div>
+        <div class="zen-popup-badge">${escapeHtml(badge)}</div>
+        <div class="zen-popup-title">${escapeHtml(place.label)}</div>
         ${meta}
       </div>
     `;
@@ -50,10 +86,7 @@
       markerElement.type = 'button';
       markerElement.className = `zen-marker zen-marker--${place.kind}`;
       markerElement.setAttribute('aria-label', place.label);
-      markerElement.innerHTML =
-        place.kind === 'food'
-          ? `<span class="zen-marker__glyph">+</span>`
-          : `<span class="zen-marker__glyph">${place.order}</span>`;
+      markerElement.innerHTML = `<span class="zen-marker__glyph">${markerGlyph(place)}</span>`;
 
       const popup = new maplibre.Popup({
         closeButton: false,
@@ -80,15 +113,22 @@
         }
       });
 
+      markerElement.addEventListener('click', () => {
+        onSelectPlace?.(place.id);
+      });
+
       markers.push(marker);
+      markerElements.set(place.id, markerElement);
     }
+
+    updateActiveMarker();
   }
 
   function renderRoute(nextPlaces: ResolvedPlace[]) {
     if (!map || !map.getStyle()) return;
 
     const activityTrack = nextPlaces
-      .filter((place) => place.kind === 'activity')
+      .filter((place) => place.kind !== 'food')
       .sort((a, b) => a.order - b.order)
       .map((place) => [place.lng, place.lat]);
 
@@ -272,6 +312,21 @@
 
   $effect(() => {
     fitMap(places);
+  });
+
+  $effect(() => {
+    updateActiveMarker();
+
+    const activePlace = places.find((place) => place.id === activePlaceId);
+    if (map && activePlace) {
+      map.easeTo({
+        center: [activePlace.lng, activePlace.lat],
+        zoom: Math.max(map.getZoom(), 14),
+        pitch: 36,
+        bearing: 0,
+        duration: 650
+      });
+    }
   });
 </script>
 
