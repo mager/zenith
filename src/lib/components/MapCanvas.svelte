@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { ResolvedPlace } from '$lib/types';
+  import type { MapPlace, SavedPlaceCategory } from '$lib/types';
   import type {
     GeoJSONSource,
     LngLatBoundsLike,
@@ -17,7 +17,7 @@
     activePlaceId = '',
     onSelectPlace
   }: {
-    places: ResolvedPlace[];
+    places: MapPlace[];
     activePlaceId?: string;
     onSelectPlace?: (placeId: string) => void;
   } = $props();
@@ -46,11 +46,31 @@
       .replace(/'/g, '&#039;');
   }
 
-  function markerGlyph(place: ResolvedPlace): string {
+  const SAVED_GLYPHS: Record<SavedPlaceCategory, string> = {
+    eat: 'F',
+    coffee: 'C',
+    night: 'N',
+    shop: 'S',
+    culture: 'A',
+    nature: 'O',
+    logistics: 'L',
+    other: '+'
+  };
+
+  function markerGlyph(place: MapPlace): string {
+    if (place.kind === 'saved') return SAVED_GLYPHS[place.savedCategory ?? 'other'];
     if (place.kind === 'food') return '+';
     if (place.kind === 'hotel') return 'H';
 
     return String(place.order);
+  }
+
+  function markerClass(place: MapPlace): string {
+    if (place.kind === 'saved') {
+      return `zen-marker zen-marker--saved zen-marker--saved-${place.savedCategory ?? 'other'}`;
+    }
+
+    return `zen-marker zen-marker--${place.kind}`;
   }
 
   function updateActiveMarker() {
@@ -59,10 +79,22 @@
     }
   }
 
-  function popupMarkup(place: ResolvedPlace): string {
+  function distanceLabel(meters: number): string {
+    if (meters < 1000) return `${Math.round(meters)} m`;
+
+    return `${(meters / 1000).toFixed(1)} km`;
+  }
+
+  function popupMarkup(place: MapPlace): string {
     const badge = place.sourceColumns[0] ?? 'Place';
-    const meta = place.resolvedLabel
-      ? `<p class="zen-popup-meta">${escapeHtml(place.resolvedLabel)}</p>`
+    const metaParts = [
+      place.resolvedLabel,
+      place.distanceMeters !== undefined && place.nearestPlaceLabel
+        ? `${distanceLabel(place.distanceMeters)} from ${place.nearestPlaceLabel}`
+        : ''
+    ].filter(Boolean);
+    const meta = metaParts.length
+      ? `<p class="zen-popup-meta">${escapeHtml(metaParts.join(' / '))}</p>`
       : '';
 
     return `
@@ -74,7 +106,7 @@
     `;
   }
 
-  function renderMarkers(nextPlaces: ResolvedPlace[]) {
+  function renderMarkers(nextPlaces: MapPlace[]) {
     if (!map || !maplibre) return;
 
     clearMarkers();
@@ -82,7 +114,7 @@
     for (const place of nextPlaces) {
       const markerElement = document.createElement('button');
       markerElement.type = 'button';
-      markerElement.className = `zen-marker zen-marker--${place.kind}`;
+      markerElement.className = markerClass(place);
       markerElement.setAttribute('aria-label', place.label);
       markerElement.innerHTML = `<span class="zen-marker__glyph">${markerGlyph(place)}</span>`;
 
@@ -122,11 +154,11 @@
     updateActiveMarker();
   }
 
-  function renderRoute(nextPlaces: ResolvedPlace[]) {
+  function renderRoute(nextPlaces: MapPlace[]) {
     if (!map || !map.getStyle()) return;
 
     const activityTrack = nextPlaces
-      .filter((place) => place.kind !== 'food')
+      .filter((place) => place.kind !== 'food' && place.kind !== 'saved')
       .sort((a, b) => a.order - b.order)
       .map((place) => [place.lng, place.lat]);
 
@@ -178,7 +210,7 @@
     });
   }
 
-  function fitMap(nextPlaces: ResolvedPlace[]) {
+  function fitMap(nextPlaces: MapPlace[]) {
     if (!map) return;
 
     renderMarkers(nextPlaces);

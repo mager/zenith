@@ -22,6 +22,14 @@
   --accent-gold: oklch(0.64 0.13 92);
   --accent-green: oklch(0.55 0.11 150);
   --accent-plum: oklch(0.45 0.12 320);
+  --saved-eat: oklch(0.58 0.14 38);
+  --saved-coffee: oklch(0.5 0.09 70);
+  --saved-night: oklch(0.44 0.13 302);
+  --saved-shop: oklch(0.54 0.13 205);
+  --saved-culture: oklch(0.5 0.13 265);
+  --saved-nature: oklch(0.52 0.12 154);
+  --saved-logistics: oklch(0.47 0.06 232);
+  --saved-other: oklch(0.55 0.1 105);
   --shadow-panel: 0 1px 2px rgba(24, 28, 33, 0.05), 0 12px 30px rgba(24, 28, 33, 0.06);
 }
 
@@ -216,21 +224,70 @@ input[type='file'] {
 
 .zen-marker--idea {
   background: var(--accent-blue);
+  --marker-ring: var(--accent-blue);
 }
 
 .zen-marker--food {
   background: var(--accent-coral);
+  --marker-ring: var(--accent-coral);
 }
 
 .zen-marker--hotel {
   background: var(--accent-green);
+  --marker-ring: var(--accent-green);
+}
+
+.zen-marker--saved {
+  border-radius: 9px;
+  height: 30px;
+  width: 30px;
+}
+
+.zen-marker--saved-eat {
+  background: var(--saved-eat);
+  --marker-ring: var(--saved-eat);
+}
+
+.zen-marker--saved-coffee {
+  background: var(--saved-coffee);
+  --marker-ring: var(--saved-coffee);
+}
+
+.zen-marker--saved-night {
+  background: var(--saved-night);
+  --marker-ring: var(--saved-night);
+}
+
+.zen-marker--saved-shop {
+  background: var(--saved-shop);
+  --marker-ring: var(--saved-shop);
+}
+
+.zen-marker--saved-culture {
+  background: var(--saved-culture);
+  --marker-ring: var(--saved-culture);
+}
+
+.zen-marker--saved-nature {
+  background: var(--saved-nature);
+  --marker-ring: var(--saved-nature);
+}
+
+.zen-marker--saved-logistics {
+  background: var(--saved-logistics);
+  --marker-ring: var(--saved-logistics);
+}
+
+.zen-marker--saved-other {
+  background: var(--saved-other);
+  --marker-ring: var(--saved-other);
 }
 
 .zen-marker--active {
   transform: translateY(-2px) scale(1.08);
   border-color: color-mix(in oklch, var(--panel-strong) 74%, transparent);
   box-shadow:
-    0 0 0 5px color-mix(in oklch, var(--accent-blue) 16%, transparent),
+    0 0 0 5px color-mix(in oklch, var(--marker-ring, var(--accent-blue)) 18%, transparent),
     0 12px 28px rgba(24, 28, 33, 0.24);
 }
 
@@ -358,6 +415,38 @@ input[type='file'] {
   background: var(--accent-green);
 }
 
+.zen-source-dot--saved-eat {
+  background: var(--saved-eat);
+}
+
+.zen-source-dot--saved-coffee {
+  background: var(--saved-coffee);
+}
+
+.zen-source-dot--saved-night {
+  background: var(--saved-night);
+}
+
+.zen-source-dot--saved-shop {
+  background: var(--saved-shop);
+}
+
+.zen-source-dot--saved-culture {
+  background: var(--saved-culture);
+}
+
+.zen-source-dot--saved-nature {
+  background: var(--saved-nature);
+}
+
+.zen-source-dot--saved-logistics {
+  background: var(--saved-logistics);
+}
+
+.zen-source-dot--saved-other {
+  background: var(--saved-other);
+}
+
 .zen-resolve-dot {
   background: var(--line-strong);
   border-radius: 999px;
@@ -397,6 +486,43 @@ input[type='file'] {
 
 .zen-source-band {
   box-shadow: 0 1px 0 rgba(24, 28, 33, 0.03);
+}
+
+.zen-nearby-saved {
+  box-shadow: 0 1px 0 rgba(24, 28, 33, 0.03);
+}
+
+.zen-list-row {
+  transition:
+    background 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.zen-list-row:hover {
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+}
+
+.zen-saved-suggestion {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-main);
+  display: flex;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.38rem 0.45rem;
+  text-align: left;
+  transition:
+    background 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.zen-saved-suggestion:hover,
+.zen-saved-suggestion--active {
+  background: var(--panel-strong);
+  border-color: var(--line);
 }
 
 .zen-day-row {
@@ -442,6 +568,14 @@ input[type='file'] {
 .zen-shell summary,
 .zen-shell input[type='file'] {
   cursor: pointer;
+}
+
+.zen-shell button:focus-visible,
+.zen-shell a:focus-visible,
+.zen-shell input:focus-visible,
+.zen-shell textarea:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent-cyan) 58%, transparent);
+  outline-offset: 2px;
 }
 
 .zen-shell textarea,
