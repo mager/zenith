@@ -1,5 +1,10 @@
 import { json } from '@sveltejs/kit';
 import { parseGoogleMapsCoordinates } from '$lib/maps';
+import {
+  collectGooglePlaceTypesFromUnknown,
+  inferGooglePlaceTypes,
+  primaryPlaceType
+} from '$lib/place-taxonomy';
 import { inferSavedPlaceCategory } from '$lib/saved-places';
 import type { SavedMapList, SavedMapPlace } from '$lib/types';
 import type { RequestHandler } from './$types';
@@ -93,6 +98,12 @@ function parseEntityEntry(entry: unknown, listId: string, listTitle: string): Sa
   const address = asString(placeData[4]) || asString(placeData[2]);
   const note = asString(entry[3]);
   const category = inferSavedPlaceCategory(`${label} ${address} ${note}`);
+  const googlePlaceTypes = inferGooglePlaceTypes(
+    `${label} ${address} ${note}`,
+    category,
+    collectGooglePlaceTypesFromUnknown(placeData)
+  );
+  const primaryType = primaryPlaceType(googlePlaceTypes, category);
   const key = `${label}-${coords.lat.toFixed(6)}-${coords.lng.toFixed(6)}`;
   const googleMapsUrl = placeSearchUrl({ label, address, lat: coords.lat, lng: coords.lng });
 
@@ -104,6 +115,8 @@ function parseEntityEntry(entry: unknown, listId: string, listTitle: string): Sa
     lat: coords.lat,
     lng: coords.lng,
     category,
+    googlePlaceTypes,
+    primaryType,
     googleMapsUrl,
     source: 'google-list',
     listId,
@@ -183,12 +196,16 @@ function parseSingleMapPlace(page: FetchResult, originalUrl: string): SavedMapLi
   if (!coords) return null;
 
   const title = extractTitle(page.text) || 'Saved map place';
+  const category = inferSavedPlaceCategory(title);
+  const googlePlaceTypes = inferGooglePlaceTypes(title, category);
   const place: SavedMapPlace = {
     id: `saved-${slugify(title) || 'place'}-${stableHash(`${title}-${coords.lat}-${coords.lng}`)}`,
     label: title,
     lat: coords.lat,
     lng: coords.lng,
-    category: inferSavedPlaceCategory(title),
+    category,
+    googlePlaceTypes,
+    primaryType: primaryPlaceType(googlePlaceTypes, category),
     googleMapsUrl: placeSearchUrl({ label: title, lat: coords.lat, lng: coords.lng }),
     source: 'map-link',
     listTitle: 'Imported map link'

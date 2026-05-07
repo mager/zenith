@@ -3,13 +3,27 @@
   import Papa from 'papaparse';
   import MapCanvas from '$lib/components/MapCanvas.svelte';
   import { normalizeItinerary } from '$lib/itinerary';
+  import {
+    buildDayNarrative,
+    buildPlaceEnrichment,
+    enrichmentKeyForPlace,
+    mergePlaceEnrichment,
+    placeHasHistory
+  } from '$lib/place-enrichment';
+  import { loadPlaceEnrichments, savePlaceEnrichment } from '$lib/place-enrichment-store';
+  import {
+    googlePlaceTypeLabel,
+    isFoodPlaceType
+  } from '$lib/place-taxonomy';
   import { sampleCsv } from '$lib/sample-itinerary';
   import { SAVED_PLACE_CATEGORIES, savedCategoryLabel } from '$lib/saved-places';
   import type {
+    GooglePlaceType,
     ItineraryDay,
     MapPlace,
     NearbySavedPlace,
     PlaceCandidate,
+    PlaceEnrichmentRecord,
     PlaceSource,
     ResolvedPlace,
     SavedMapList,
@@ -18,13 +32,22 @@
   } from '$lib/types';
 
   type DetailPanel = 'csv' | 'maps' | null;
+  type MapLens = 'smart' | 'stay' | 'food' | 'history';
 
-  const NEARBY_RADIUS_METERS = 1600;
+  const EXAMPLE_SAVED_LIST_URL = 'https://maps.app.goo.gl/zZdZRFg5A3CamwaaA';
+  const NEARBY_ROUTE_RADIUS_METERS = 1600;
+  const NEARBY_STAY_RADIUS_METERS = 1800;
   const NEARBY_FALLBACK_RADIUS_METERS = 3200;
   const NEARBY_LIMIT = 32;
   const SAVED_LISTS_STORAGE_KEY = 'zen.saved-map-lists.v1';
 
   const placeColumns: PlaceSource[] = ['Ideas', 'Must Eats', 'Hotel'];
+  const mapLensOptions: Array<{ id: MapLens; label: string }> = [
+    { id: 'smart', label: 'Smart' },
+    { id: 'stay', label: 'Near Stay' },
+    { id: 'food', label: 'Food' },
+    { id: 'history', label: 'History' }
+  ];
   const initialDays = normalizeCsv(sampleCsv);
 
   let rawCsv = $state(sampleCsv);
@@ -37,12 +60,20 @@
   let resolutionErrors = $state<Record<string, string>>({});
   let loadingDayIds = $state<Record<string, boolean>>({});
   let activePanel = $state<DetailPanel>(null);
-  let savedListUrl = $state('');
+  let mapLens = $state<MapLens>('smart');
+  let savedListUrl = $state(EXAMPLE_SAVED_LIST_URL);
   let savedLists = $state<SavedMapList[]>([]);
   let importingSavedList = $state(false);
   let savedImportError = $state('');
   let savedImportStatus = $state('');
   let savedStorageReady = $state(false);
+  let placeEnrichments = $state<Record<string, PlaceEnrichmentRecord>>({});
+  let enrichmentStorageLabel = $state('Local enrichment');
+  let enrichmentDraft = $state('');
+  let enrichmentDraftPlaceId = $state('');
+  let enrichmentSaving = $state(false);
+  let enrichmentStatus = $state('');
+  let enrichmentError = $state('');
 
   function normalizeCsv(text: string): ItineraryDay[] {
     const parsed = Papa.parse<Record<string, string>>(text, {
@@ -56,6 +87,7 @@
   let activeDay = $derived(days.find((day) => day.id === activeDayId) ?? days[0]);
   let activePlaces = $derived(activeDay?.places ?? []);
   let activeResolvedPlaces = $derived(resolvedByDay[activeDay?.id ?? ''] ?? []);
+  let activeStayPlaces = $derived(activeResolvedPlaces.filter((place) => place.kind === 'hotel'));
   let savedPlaces = $derived(
     savedLists.flatMap((list) =>
       list.places.map((place) => ({
@@ -65,7 +97,10 @@
       }))
     )
   );
-  let activeNearbySavedPlaces = $derived(findNearbySavedPlaces(activeResolvedPlaces, savedPlaces));
+  let activeNearbySavedPlaces = $derived(
+    findNearbySavedPlaces(activeResolvedPlaces, activeStayPlaces, savedPlaces)
+  );
+  let activeLensSavedPlaces = $derived(activeNearbySavedPlaces.filter(matchesMapLens));
   let activeSavedPlace = $derived(
     activeNearbySavedPlaces.find((place) => place.id === activePlaceId)
   );
@@ -74,9 +109,16 @@
       (activeSavedPlace ? undefined : activePlaces[0])
   );
   let activeFocusPlace = $derived(activeSavedPlace ?? activePlace);
+  let activePlaceEnrichment = $derived(
+    activeFocusPlace ? enrichmentForPlace(activeFocusPlace) : undefined
+  );
+  let activeDayNarrative = $derived(
+    buildDayNarrative(activeDay, activeResolvedPlaces, activeNearbySavedPlaces, placeEnrichments)
+  );
+  let visibleResolvedPlaces = $derived(activeResolvedPlaces.filter(matchesMapLens));
   let activeMapPlaces = $derived<MapPlace[]>([
-    ...activeResolvedPlaces,
-    ...activeNearbySavedPlaces.map(mapSavedPlace)
+    ...visibleResolvedPlaces.map(mapResolvedPlace),
+    ...activeLensSavedPlaces.map(mapSavedPlace)
   ]);
   let easyNextPlaces = $derived(
     activeNearbySavedPlaces.filter((place) => place.distanceMeters <= 900).slice(0, 4)
@@ -91,7 +133,9 @@
       ? 'Finding pins'
       : resolutionErrors[activeDay?.id ?? ''] ||
           `${activeResolvedPlaces.length}/${activePlaces.length} pinned${
-            activeNearbySavedPlaces.length ? `, ${activeNearbySavedPlaces.length} saved nearby` : ''
+            activeNearbySavedPlaces.length
+              ? `, ${activeLensSavedPlaces.length}/${activeNearbySavedPlaces.length} saved in ${mapLensLabel(mapLens).toLowerCase()}`
+              : ''
           }`
   );
 
@@ -214,42 +258,112 @@
     return radius * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
   }
 
+  function nearestResolvedPlace(
+    savedPlace: SavedMapPlace,
+    anchors: ResolvedPlace[]
+  ): { place: ResolvedPlace; distance: number } | undefined {
+    return anchors
+      .map((dayPlace) => ({
+        place: dayPlace,
+        distance: distanceMeters(savedPlace, dayPlace)
+      }))
+      .sort((a, b) => a.distance - b.distance)[0];
+  }
+
   function findNearbySavedPlaces(
     dayPlaces: ResolvedPlace[],
+    stayPlaces: ResolvedPlace[],
     candidates: SavedMapPlace[]
   ): NearbySavedPlace[] {
     if (!dayPlaces.length || !candidates.length) return [];
 
-    const ranked = candidates.flatMap((savedPlace) => {
-      const nearest = dayPlaces
-        .map((dayPlace) => ({
-          dayPlace,
-          distance: distanceMeters(savedPlace, dayPlace)
-        }))
-        .sort((a, b) => a.distance - b.distance)[0];
+    const routeAnchors = dayPlaces.filter((place) => place.kind !== 'hotel');
+    const fallbackRouteAnchors = routeAnchors.length ? routeAnchors : dayPlaces;
 
-      if (!nearest) return [];
+    const ranked = candidates.flatMap((savedPlace) => {
+      const routeNearest = nearestResolvedPlace(savedPlace, fallbackRouteAnchors);
+      const stayNearest = nearestResolvedPlace(savedPlace, stayPlaces);
+      const routeDistanceMeters = routeNearest?.distance;
+      const stayDistanceMeters = stayNearest?.distance;
+      const routeVisible =
+        routeDistanceMeters !== undefined && routeDistanceMeters <= NEARBY_ROUTE_RADIUS_METERS;
+      const stayVisible =
+        stayDistanceMeters !== undefined && stayDistanceMeters <= NEARBY_STAY_RADIUS_METERS;
+      const distanceMeters = Math.min(
+        routeDistanceMeters ?? Number.POSITIVE_INFINITY,
+        stayDistanceMeters ?? Number.POSITIVE_INFINITY
+      );
+
+      if (!Number.isFinite(distanceMeters)) return [];
+
+      const nearest =
+        stayDistanceMeters !== undefined && stayDistanceMeters === distanceMeters
+          ? stayNearest
+          : routeNearest;
+      const proximity: NearbySavedPlace['proximity'] =
+        stayVisible && routeVisible
+          ? 'both'
+          : stayVisible || stayDistanceMeters === distanceMeters
+            ? 'stay'
+            : 'route';
 
       return [
         {
           ...savedPlace,
-          distanceMeters: nearest.distance,
-          nearestPlaceId: nearest.dayPlace.id,
-          nearestPlaceLabel: nearest.dayPlace.label
+          distanceMeters,
+          nearestPlaceId: nearest?.place.id ?? '',
+          nearestPlaceLabel: nearest?.place.label ?? '',
+          routeDistanceMeters,
+          stayDistanceMeters,
+          stayPlaceId: stayNearest?.place.id,
+          stayPlaceLabel: stayNearest?.place.label,
+          proximity
         }
       ];
     });
 
-    const walkable = ranked.filter((place) => place.distanceMeters <= NEARBY_RADIUS_METERS);
+    const targeted = ranked.filter(
+      (place) =>
+        (place.routeDistanceMeters ?? Number.POSITIVE_INFINITY) <= NEARBY_ROUTE_RADIUS_METERS ||
+        (place.stayDistanceMeters ?? Number.POSITIVE_INFINITY) <= NEARBY_STAY_RADIUS_METERS
+    );
     const visible =
-      walkable.length >= 6
-        ? walkable
+      targeted.length >= 6
+        ? targeted
         : ranked.filter((place) => place.distanceMeters <= NEARBY_FALLBACK_RADIUS_METERS);
 
     return visible.sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, NEARBY_LIMIT);
   }
 
+  function enrichmentForPlace(
+    place: PlaceCandidate | ResolvedPlace | NearbySavedPlace | SavedMapPlace
+  ): PlaceEnrichmentRecord {
+    const base = buildPlaceEnrichment(place);
+
+    return mergePlaceEnrichment(base, placeEnrichments[enrichmentKeyForPlace(place)]) ?? base;
+  }
+
+  function mapResolvedPlace(place: ResolvedPlace): MapPlace {
+    const enrichment = enrichmentForPlace(place);
+
+    return {
+      ...place,
+      googlePlaceTypes: enrichment.googlePlaceTypes,
+      primaryType: enrichment.primaryType,
+      placeTypeLabel: googlePlaceTypeLabel(enrichment.primaryType),
+      storyHeadline: enrichment.history?.headline
+    };
+  }
+
   function mapSavedPlace(place: NearbySavedPlace, index: number): MapPlace {
+    const enrichment = enrichmentForPlace(place);
+    const proximityLabel =
+      place.proximity === 'both'
+        ? 'Near route and stay'
+        : place.proximity === 'stay'
+          ? `Near stay${place.stayPlaceLabel ? `: ${place.stayPlaceLabel}` : ''}`
+          : `Near route${place.nearestPlaceLabel ? `: ${place.nearestPlaceLabel}` : ''}`;
+
     return {
       id: place.id,
       label: place.label,
@@ -257,11 +371,18 @@
       lng: place.lng,
       kind: 'saved',
       order: index + 1,
-      sourceColumns: [savedCategoryLabel(place.category)],
+      sourceColumns: [savedCategoryLabel(place.category), googlePlaceTypeLabel(enrichment.primaryType)],
       resolvedLabel: place.address ?? place.listTitle,
       savedCategory: place.category,
+      googlePlaceTypes: enrichment.googlePlaceTypes,
+      primaryType: enrichment.primaryType,
+      placeTypeLabel: googlePlaceTypeLabel(enrichment.primaryType),
       distanceMeters: place.distanceMeters,
-      nearestPlaceLabel: place.nearestPlaceLabel
+      routeDistanceMeters: place.routeDistanceMeters,
+      stayDistanceMeters: place.stayDistanceMeters,
+      nearestPlaceLabel: place.nearestPlaceLabel,
+      proximityLabel,
+      storyHeadline: enrichment.history?.headline
     };
   }
 
@@ -273,9 +394,49 @@
 
   function effortLabel(meters: number): string {
     if (meters <= 700) return 'walk';
-    if (meters <= NEARBY_RADIUS_METERS) return 'easy hop';
+    if (meters <= NEARBY_ROUTE_RADIUS_METERS) return 'easy hop';
 
     return 'nearby';
+  }
+
+  function mapLensLabel(lens: MapLens): string {
+    return mapLensOptions.find((option) => option.id === lens)?.label ?? 'Smart';
+  }
+
+  function matchesMapLens(place: ResolvedPlace | NearbySavedPlace): boolean {
+    if (mapLens === 'smart') return true;
+
+    if (mapLens === 'stay') {
+      return isSavedPlace(place)
+        ? place.proximity === 'stay' || place.proximity === 'both'
+        : place.kind === 'hotel';
+    }
+
+    const enrichment = enrichmentForPlace(place);
+
+    if (mapLens === 'history') {
+      return isSavedPlace(place)
+        ? Boolean(enrichment.history) || placeHasHistory(place)
+        : place.kind === 'hotel' || Boolean(enrichment.history) || placeHasHistory(place);
+    }
+
+    return isSavedPlace(place)
+      ? ['eat', 'coffee', 'night'].includes(place.category) ||
+          isFoodPlaceType(enrichment.googlePlaceTypes)
+      : place.kind === 'food' || isFoodPlaceType(enrichment.googlePlaceTypes);
+  }
+
+  function typeLabelForPlace(place: PlaceCandidate | NearbySavedPlace): string {
+    const enrichment = enrichmentForPlace(place);
+
+    return googlePlaceTypeLabel(enrichment.primaryType);
+  }
+
+  function shortPlaceTypes(types: GooglePlaceType[] | undefined): string {
+    return (types ?? [])
+      .slice(0, 3)
+      .map((type) => googlePlaceTypeLabel(type))
+      .join(', ');
   }
 
   function isSavedPlace(
@@ -317,14 +478,50 @@
     }
   }
 
+  function useExampleMap() {
+    savedListUrl = EXAMPLE_SAVED_LIST_URL;
+    activePanel = 'maps';
+    savedImportError = '';
+    savedImportStatus = 'Ready to import your example Japan map.';
+  }
+
   function removeSavedList(listId: string) {
     savedLists = savedLists.filter((list) => list.id !== listId);
     savedImportStatus = '';
     savedImportError = '';
   }
 
+  async function saveActiveEnrichmentNote() {
+    if (!activeFocusPlace || !activePlaceEnrichment || enrichmentSaving) return;
+
+    enrichmentSaving = true;
+    enrichmentStatus = '';
+    enrichmentError = '';
+
+    const record: PlaceEnrichmentRecord = {
+      ...activePlaceEnrichment,
+      personalNote: enrichmentDraft.trim() || undefined,
+      source: 'manual',
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      const storage = await savePlaceEnrichment(record);
+      placeEnrichments = {
+        ...placeEnrichments,
+        [record.id]: record
+      };
+      enrichmentStorageLabel = storage === 'firestore' ? 'Firestore enrichment' : 'Local enrichment';
+      enrichmentStatus = storage === 'firestore' ? 'Saved to Firestore.' : 'Saved locally.';
+    } catch (error) {
+      enrichmentError = error instanceof Error ? error.message : 'Could not save enrichment.';
+    } finally {
+      enrichmentSaving = false;
+    }
+  }
+
   function savedPlacesByCategory(category: SavedPlaceCategory): NearbySavedPlace[] {
-    return activeNearbySavedPlaces.filter((place) => place.category === category);
+    return activeLensSavedPlaces.filter((place) => place.category === category);
   }
 
   function selectPlace(placeId: string) {
@@ -383,6 +580,12 @@
     }
 
     savedStorageReady = true;
+
+    void (async () => {
+      const loaded = await loadPlaceEnrichments();
+      placeEnrichments = loaded.records;
+      enrichmentStorageLabel = loaded.storageLabel;
+    })();
   });
 
   $effect(() => {
@@ -395,6 +598,23 @@
     if (!savedStorageReady) return;
 
     localStorage.setItem(SAVED_LISTS_STORAGE_KEY, JSON.stringify(savedLists));
+  });
+
+  $effect(() => {
+    const nextPlaceId = activeFocusPlace?.id ?? '';
+
+    if (nextPlaceId === enrichmentDraftPlaceId) return;
+
+    enrichmentDraftPlaceId = nextPlaceId;
+    enrichmentDraft = activePlaceEnrichment?.personalNote ?? '';
+    enrichmentStatus = '';
+    enrichmentError = '';
+  });
+
+  $effect(() => {
+    if (!activeMapPlaces.length || activeMapPlaces.some((place) => place.id === activePlaceId)) return;
+
+    activePlaceId = activeMapPlaces[0].id;
   });
 </script>
 
@@ -479,9 +699,18 @@
 
           {#if activePanel === 'maps'}
             <div class="mt-4">
-              <label class="block text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]" for="saved-list-url">
-                Google Maps List
-              </label>
+              <div class="flex items-center justify-between gap-3">
+                <label class="block text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]" for="saved-list-url">
+                  Google Maps List
+                </label>
+                <button
+                  type="button"
+                  class="rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)] transition hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]"
+                  onclick={useExampleMap}
+                >
+                  Use example
+                </button>
+              </div>
               <div class="mt-2 flex gap-2">
                 <input
                   id="saved-list-url"
@@ -499,6 +728,9 @@
                   {importingSavedList ? 'Adding' : 'Add'}
                 </button>
               </div>
+              <p class="mt-2 text-[11px] leading-4 text-[var(--text-soft)]">
+                The example link is prefilled, and imported lists stay on this machine.
+              </p>
 
               {#if savedImportStatus}
                 <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{savedImportStatus}</p>
@@ -610,6 +842,37 @@
                   <span class="truncate">Tonight: {activeHotel.label}</span>
                 </button>
               {/if}
+              <div class="mt-3 flex flex-wrap gap-2">
+                {#each mapLensOptions as option}
+                  <button
+                    type="button"
+                    class={`zen-map-chip ${mapLens === option.id ? 'zen-map-chip--active' : ''}`}
+                    onclick={() => (mapLens = option.id)}
+                  >
+                    {option.label}
+                  </button>
+                {/each}
+              </div>
+              {#if activeDayNarrative.historyStops.length || activeDayNarrative.savedHistoryCount}
+                <div class="zen-story-strip mt-3">
+                  <div class="min-w-0">
+                    <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
+                      Story Thread
+                    </div>
+                    <p class="mt-1 text-[13px] font-semibold leading-5">{activeDayNarrative.headline}</p>
+                    <p class="mt-1 max-w-[54rem] text-[12px] leading-5 text-[var(--text-muted)]">
+                      {activeDayNarrative.summary}
+                    </p>
+                  </div>
+                  {#if activeDayNarrative.themes.length}
+                    <div class="zen-story-themes">
+                      {#each activeDayNarrative.themes as theme}
+                        <span>{theme}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             </div>
           </div>
 
@@ -643,7 +906,10 @@
                       </div>
                       <h3 class="mt-1 text-[1.12rem] font-semibold leading-tight">{activeSavedPlace.label}</h3>
                       <p class="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
-                        {formatDistance(activeSavedPlace.distanceMeters)} from {activeSavedPlace.nearestPlaceLabel}
+                        {typeLabelForPlace(activeSavedPlace)} /
+                        {activeSavedPlace.proximity === 'stay' && activeSavedPlace.stayPlaceLabel
+                          ? `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.stayPlaceLabel}`
+                          : `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.nearestPlaceLabel}`}
                       </p>
                     </div>
                     <span class={`zen-source-dot zen-source-dot--saved-${activeSavedPlace.category} mt-1`}></span>
@@ -683,7 +949,7 @@
                       </div>
                       <h3 class="mt-1 text-[1.12rem] font-semibold leading-tight">{activePlace.label}</h3>
                       <p class="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
-                        {activeResolvedPlace?.resolvedLabel ?? activePlace.query}
+                        {typeLabelForPlace(activePlace)} / {activeResolvedPlace?.resolvedLabel ?? activePlace.query}
                       </p>
                     </div>
                     <span class={`zen-source-dot zen-source-dot--${activePlace.kind} mt-1`}></span>
@@ -722,6 +988,75 @@
                     {/if}
                   </div>
                 {/if}
+
+                {#if activePlaceEnrichment}
+                  <div class="zen-enrichment-box mt-4">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="zen-type-token">{googlePlaceTypeLabel(activePlaceEnrichment.primaryType)}</span>
+                      {#if shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
+                        <span class="text-[11px] leading-4 text-[var(--text-soft)]">
+                          {shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
+                        </span>
+                      {/if}
+                    </div>
+
+                    {#if activePlaceEnrichment.history}
+                      <div class="mt-3 border-t border-[var(--line)] pt-3">
+                        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
+                          History
+                        </div>
+                        <h4 class="mt-1 text-[0.94rem] font-semibold leading-tight">
+                          {activePlaceEnrichment.history.headline}
+                        </h4>
+                        <p class="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-soft)]">
+                          {activePlaceEnrichment.history.era}
+                        </p>
+                        <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
+                          {activePlaceEnrichment.history.context}
+                        </p>
+                        <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
+                          {activePlaceEnrichment.history.whyVisit}
+                        </p>
+                        {#if activePlaceEnrichment.history.visitCue}
+                          <p class="mt-2 text-[12px] leading-5 text-[var(--text-main)]">
+                            {activePlaceEnrichment.history.visitCue}
+                          </p>
+                        {/if}
+                      </div>
+                    {/if}
+
+                    <div class="mt-3 border-t border-[var(--line)] pt-3">
+                      <div class="flex items-center justify-between gap-3">
+                        <label class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]" for="enrichment-note">
+                          My layer
+                        </label>
+                        <span class="text-[10px] text-[var(--text-soft)]">{enrichmentStorageLabel}</span>
+                      </div>
+                      <textarea
+                        id="enrichment-note"
+                        bind:value={enrichmentDraft}
+                        class="mt-2 h-20 w-full resize-none rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2 text-[12px] leading-5 text-[var(--text-main)]"
+                        placeholder="Add why this matters, booking notes, or a history angle to research later."
+                      ></textarea>
+                      <div class="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          class="rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={enrichmentSaving}
+                          onclick={saveActiveEnrichmentNote}
+                        >
+                          {enrichmentSaving ? 'Saving' : 'Save note'}
+                        </button>
+                        {#if enrichmentStatus}
+                          <span class="text-[11px] text-[var(--text-muted)]">{enrichmentStatus}</span>
+                        {/if}
+                        {#if enrichmentError}
+                          <span class="text-[11px] text-[var(--accent-coral)]">{enrichmentError}</span>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                {/if}
               </article>
             </div>
           {/if}
@@ -735,7 +1070,46 @@
             <span class="text-[11px] text-[var(--text-muted)]">{activePlaces.length} pins</span>
           </div>
 
-          <div class="mt-3 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_27rem]">
+          <section class="zen-history-thread mt-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h4 class="text-[12px] font-semibold">{activeDayNarrative.headline}</h4>
+                <p class="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
+                  {activeDayNarrative.summary}
+                </p>
+              </div>
+              <button
+                type="button"
+                class={`shrink-0 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                  mapLens === 'history'
+                    ? 'border-[var(--line-strong)] bg-[var(--text-main)] text-[var(--panel-strong)]'
+                    : 'border-[var(--line)] bg-[var(--bg-0)] text-[var(--text-muted)] hover:border-[var(--line-strong)] hover:bg-[var(--panel-strong)]'
+                }`}
+                onclick={() => (mapLens = 'history')}
+              >
+                History lens
+              </button>
+            </div>
+
+            {#if activeDayNarrative.historyStops.length}
+              <div class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {#each activeDayNarrative.historyStops.slice(0, 6) as stop}
+                  <button
+                    type="button"
+                    class="zen-history-stop"
+                    onclick={() => selectPlace(activePlaces.find((place) => enrichmentKeyForPlace(place) === stop.id)?.id ?? '')}
+                  >
+                    <span class="text-[11px] font-semibold">{stop.label}</span>
+                    <span class="mt-1 line-clamp-2 text-[11px] leading-4 text-[var(--text-muted)]">
+                      {stop.history?.headline}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </section>
+
+          <div class="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_27rem]">
             <div class="grid gap-3 xl:grid-cols-3">
               {#each placeColumns as source}
                 <section class="zen-source-band rounded-lg border border-[var(--line)] bg-[var(--panel-strong)] p-3">
@@ -766,10 +1140,10 @@
                 <div>
                   <h4 class="text-[12px] font-semibold">Nearby Saved</h4>
                   <p class="mt-1 text-[11px] text-[var(--text-muted)]">
-                    {activeNearbySavedPlaces.length
-                      ? `${activeNearbySavedPlaces.length} close to today's route`
+                    {activeLensSavedPlaces.length
+                      ? `${activeLensSavedPlaces.length} shown in ${mapLensLabel(mapLens).toLowerCase()} lens`
                       : savedLists.length
-                        ? 'No saved pins close to this day yet'
+                        ? 'No saved pins match this lens yet'
                         : 'Add a Maps list to unlock this'}
                   </p>
                 </div>
@@ -796,7 +1170,7 @@
                       >
                         <span class={`zen-source-dot zen-source-dot--saved-${place.category}`}></span>
                         <span class="min-w-0 flex-1 truncate">{place.label}</span>
-                        <span>{formatDistance(place.distanceMeters)}</span>
+                        <span>{place.proximity === 'stay' ? 'stay' : formatDistance(place.distanceMeters)}</span>
                       </button>
                     {/each}
                   </div>
@@ -831,9 +1205,9 @@
                   {/if}
                 {/each}
 
-                {#if !activeNearbySavedPlaces.length}
+                {#if !activeLensSavedPlaces.length}
                   <p class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                    Saved places appear here when they are close enough to today's pinned plans or hotel.
+                    Saved places appear here when they match the active lens and are close to today's route or hotel.
                   </p>
                 {/if}
               </div>

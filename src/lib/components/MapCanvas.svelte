@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { MapPlace, SavedPlaceCategory } from '$lib/types';
+  import type { GooglePlaceType, MapPlace, SavedPlaceCategory } from '$lib/types';
   import type {
     GeoJSONSource,
     LngLatBoundsLike,
@@ -57,8 +57,36 @@
     other: '+'
   };
 
+  const TYPE_GLYPHS: Partial<Record<GooglePlaceType, string>> = {
+    bakery: 'B',
+    bar: 'B',
+    cafe: 'C',
+    department_store: 'D',
+    food: 'F',
+    garden: 'G',
+    historic_site: 'H',
+    lodging: 'H',
+    meal_takeaway: 'Q',
+    museum: 'M',
+    natural_feature: 'N',
+    night_club: 'N',
+    park: 'P',
+    place_of_worship: 'W',
+    restaurant: 'R',
+    shopping_mall: 'S',
+    spa: 'O',
+    stadium: 'S',
+    store: 'S',
+    tourist_attraction: 'A',
+    train_station: 'T',
+    transit_station: 'T',
+    zoo: 'Z'
+  };
+
   function markerGlyph(place: MapPlace): string {
-    if (place.kind === 'saved') return SAVED_GLYPHS[place.savedCategory ?? 'other'];
+    if (place.kind === 'saved') {
+      return TYPE_GLYPHS[place.primaryType ?? 'other'] ?? SAVED_GLYPHS[place.savedCategory ?? 'other'];
+    }
     if (place.kind === 'food') return '+';
     if (place.kind === 'hotel') return 'H';
 
@@ -67,10 +95,12 @@
 
   function markerClass(place: MapPlace): string {
     if (place.kind === 'saved') {
-      return `zen-marker zen-marker--saved zen-marker--saved-${place.savedCategory ?? 'other'}`;
+      return `zen-marker zen-marker--saved zen-marker--saved-${place.savedCategory ?? 'other'} ${
+        place.storyHeadline ? 'zen-marker--story' : ''
+      }`;
     }
 
-    return `zen-marker zen-marker--${place.kind}`;
+    return `zen-marker zen-marker--${place.kind} ${place.storyHeadline ? 'zen-marker--story' : ''}`;
   }
 
   function updateActiveMarker() {
@@ -88,8 +118,11 @@
   function popupMarkup(place: MapPlace): string {
     const badge = place.sourceColumns[0] ?? 'Place';
     const metaParts = [
+      place.placeTypeLabel,
+      place.storyHeadline,
       place.resolvedLabel,
-      place.distanceMeters !== undefined && place.nearestPlaceLabel
+      place.proximityLabel,
+      place.distanceMeters !== undefined && place.nearestPlaceLabel && !place.proximityLabel
         ? `${distanceLabel(place.distanceMeters)} from ${place.nearestPlaceLabel}`
         : ''
     ].filter(Boolean);

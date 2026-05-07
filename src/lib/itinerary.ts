@@ -170,6 +170,54 @@ const KNOWN_PLACES: KnownPlace[] = [
     confidence: 'area'
   },
   {
+    canonicalKey: 'hakone-shrine',
+    label: 'Hakone Shrine',
+    query: 'Hakone Shrine, Hakone, Japan',
+    aliases: ['hakone shrine', 'water torii']
+  },
+  {
+    canonicalKey: 'fushimi-inari-taisha',
+    label: 'Fushimi Inari Taisha',
+    query: 'Fushimi Inari Taisha, Kyoto, Japan',
+    aliases: ['fushimi inari', 'fushimi inari taisha', 'inari shrine']
+  },
+  {
+    canonicalKey: 'kinkakuji',
+    label: 'Kinkaku-ji',
+    query: 'Kinkaku-ji, Kyoto, Japan',
+    aliases: ['kinkaku-ji', 'kinkakuji', 'golden pavilion']
+  },
+  {
+    canonicalKey: 'ryoanji',
+    label: 'Ryoan-ji',
+    query: 'Ryoan-ji, Kyoto, Japan',
+    aliases: ['ryoan-ji', 'ryoanji']
+  },
+  {
+    canonicalKey: 'nanzenji',
+    label: 'Nanzen-ji',
+    query: 'Nanzen-ji, Kyoto, Japan',
+    aliases: ['nanzen-ji', 'nanzenji']
+  },
+  {
+    canonicalKey: 'tenryuji',
+    label: 'Tenryu-ji',
+    query: 'Tenryu-ji, Arashiyama, Kyoto, Japan',
+    aliases: ['tenryu-ji', 'tenryuji', 'tenryu-ji garden']
+  },
+  {
+    canonicalKey: 'sumiyoshi-taisha',
+    label: 'Sumiyoshi Taisha',
+    query: 'Sumiyoshi Taisha, Osaka, Japan',
+    aliases: ['sumiyoshi taisha', 'sumiyoshi shrine']
+  },
+  {
+    canonicalKey: 'todai-ji',
+    label: 'Todai-ji',
+    query: 'Todai-ji, Nara, Japan',
+    aliases: ['todai-ji', 'todaiji', 'todai-ji giant buddha', 'giant buddha']
+  },
+  {
     canonicalKey: 'kimpton-shinjuku',
     label: 'Kimpton Shinjuku Tokyo',
     query: 'Kimpton Shinjuku Tokyo, Tokyo, Japan',

@@ -120,6 +120,46 @@ const CURATED_PLACES: Record<string, Omit<NonNullable<ResolveResponse>, 'source'
     lng: 139.792091,
     resolvedLabel: 'Ryogoku chanko-nabe area'
   },
+  'hakone-shrine': {
+    lat: 35.204902,
+    lng: 139.026854,
+    resolvedLabel: 'Hakone Shrine'
+  },
+  'fushimi-inari-taisha': {
+    lat: 34.967146,
+    lng: 135.772671,
+    resolvedLabel: 'Fushimi Inari Taisha'
+  },
+  kinkakuji: {
+    lat: 35.03937,
+    lng: 135.729243,
+    resolvedLabel: 'Kinkaku-ji'
+  },
+  ryoanji: {
+    lat: 35.034494,
+    lng: 135.718263,
+    resolvedLabel: 'Ryoan-ji'
+  },
+  nanzenji: {
+    lat: 35.011649,
+    lng: 135.793881,
+    resolvedLabel: 'Nanzen-ji'
+  },
+  tenryuji: {
+    lat: 35.015901,
+    lng: 135.673548,
+    resolvedLabel: 'Tenryu-ji'
+  },
+  'sumiyoshi-taisha': {
+    lat: 34.612872,
+    lng: 135.493792,
+    resolvedLabel: 'Sumiyoshi Taisha'
+  },
+  'todai-ji': {
+    lat: 34.688985,
+    lng: 135.839816,
+    resolvedLabel: 'Todai-ji'
+  },
   'kimpton-shinjuku': {
     lat: 35.68556,
     lng: 139.692286,
