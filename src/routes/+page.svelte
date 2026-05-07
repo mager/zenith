@@ -85,6 +85,8 @@
   let weatherError = $state('');
   let weatherFetchedAt = $state('');
   let weatherRequestRun = 0;
+  let setupOpen = $state(false);
+  let mapDetailsOpen = $state(false);
 
   function normalizeCsv(text: string): ItineraryDay[] {
     const parsed = Papa.parse<Record<string, string>>(text, {
@@ -222,6 +224,7 @@
 
   function selectDay(dayId: string) {
     activeDayId = dayId;
+    mapDetailsOpen = false;
 
     const nextDay = days.find((day) => day.id === dayId);
     activePlaceId = nextDay?.places[0]?.id ?? '';
@@ -247,6 +250,7 @@
     resolutionErrors = {};
     loadingDayIds = {};
     loadError = parsedDays.length ? '' : 'No itinerary rows found in that CSV.';
+    setupOpen = !parsedDays.length;
 
     if (parsedDays[0]) {
       void resolvePlaces(parsedDays[0]);
@@ -598,9 +602,11 @@
       savedLists = [importedList, ...savedLists.filter((list) => list.id !== importedList.id)];
       savedImportStatus = `Imported ${importedList.places.length} places from ${importedList.title}.`;
       savedListUrl = '';
+      setupOpen = false;
     } catch (error) {
       savedImportError = error instanceof Error ? error.message : 'Maps list import failed.';
       savedImportStatus = '';
+      setupOpen = true;
     } finally {
       importingSavedList = false;
     }
@@ -653,6 +659,7 @@
 
   function selectPlace(placeId: string) {
     activePlaceId = placeId;
+    mapDetailsOpen = false;
   }
 
   function placesBySource(source: PlaceSource): PlaceCandidate[] {
@@ -756,6 +763,7 @@
     if (!activeMapPlaces.length || activeMapPlaces.some((place) => place.id === activePlaceId)) return;
 
     activePlaceId = activeMapPlaces[0].id;
+    mapDetailsOpen = false;
   });
 </script>
 
@@ -797,75 +805,96 @@
         </div>
       </header>
 
-      <section class="zen-input-deck" aria-label="Planner inputs">
-        <div class="zen-input-block zen-input-block--csv">
-          <div class="zen-section-head">
-            <div>
-              <span class="zen-kicker">Input 1</span>
-              <h2>CSV itinerary</h2>
-            </div>
-            <button type="button" class="zen-primary-button" onclick={pasteCsv}>Rebuild planner</button>
+      <section class={`zen-setup-console ${setupOpen ? 'zen-setup-console--open' : ''}`} aria-label="Planner setup">
+        <div class="zen-setup-bar">
+          <div class="min-w-0">
+            <span class="zen-kicker">Setup</span>
+            <h2>CSV and Maps are loaded</h2>
           </div>
-          <textarea
-            bind:value={rawCsv}
-            class="zen-code zen-csv-box"
-            spellcheck="false"
-            aria-label="CSV itinerary paste area"
-          ></textarea>
-          {#if loadError}
-            <p class="zen-error-line">{loadError}</p>
-          {/if}
+          <div class="zen-setup-pills" aria-label="Input status">
+            <span>{days.length} days</span>
+            <span>{totalItineraryPlaces} places</span>
+            <span>{savedPlaces.length} saved</span>
+          </div>
+          <button type="button" class="zen-quiet-button" onclick={() => (setupOpen = !setupOpen)}>
+            {setupOpen ? 'Hide inputs' : 'Edit inputs'}
+          </button>
         </div>
 
-        <div class="zen-input-block zen-input-block--maps">
-          <div class="zen-section-head">
-            <div>
-              <span class="zen-kicker">Input 2</span>
-              <h2>Google Maps link</h2>
-            </div>
-            <button type="button" class="zen-quiet-button" onclick={useExampleMap}>Example</button>
-          </div>
-          <div class="zen-map-import-row">
-            <input
-              id="saved-list-url"
-              bind:value={savedListUrl}
-              class="zen-url-input"
-              placeholder="https://maps.app.goo.gl/..."
-              type="url"
-            />
-            <button
-              type="button"
-              class="zen-primary-button"
-              disabled={importingSavedList}
-              onclick={importSavedList}
-            >
-              {importingSavedList ? 'Importing' : 'Import'}
-            </button>
-          </div>
-
-          {#if savedImportStatus}
-            <p class="zen-status-line">{savedImportStatus}</p>
-          {/if}
-          {#if savedImportError}
-            <p class="zen-error-line">{savedImportError}</p>
-          {/if}
-
-          <div class="zen-imported-lists">
-            {#each savedLists as list}
-              <div class="zen-list-row">
-                <div class="min-w-0">
-                  <strong>{list.title}</strong>
-                  <span>{list.places.length} places</span>
+        {#if setupOpen}
+          <div class="zen-setup-drawer">
+            <div class="zen-input-deck" aria-label="Planner inputs">
+              <div class="zen-input-block zen-input-block--csv">
+                <div class="zen-section-head">
+                  <div>
+                    <span class="zen-kicker">Input 1</span>
+                    <h2>CSV itinerary</h2>
+                  </div>
+                  <button type="button" class="zen-primary-button" onclick={pasteCsv}>Rebuild planner</button>
                 </div>
-                <button type="button" class="zen-quiet-button" onclick={() => removeSavedList(list.id)}>
-                  Remove
-                </button>
+                <textarea
+                  bind:value={rawCsv}
+                  class="zen-code zen-csv-box"
+                  spellcheck="false"
+                  aria-label="CSV itinerary paste area"
+                ></textarea>
+                {#if loadError}
+                  <p class="zen-error-line">{loadError}</p>
+                {/if}
               </div>
-            {:else}
-              <div class="zen-empty-inline">No Maps list imported yet.</div>
-            {/each}
+
+              <div class="zen-input-block zen-input-block--maps">
+                <div class="zen-section-head">
+                  <div>
+                    <span class="zen-kicker">Input 2</span>
+                    <h2>Google Maps link</h2>
+                  </div>
+                  <button type="button" class="zen-quiet-button" onclick={useExampleMap}>Example</button>
+                </div>
+                <div class="zen-map-import-row">
+                  <input
+                    id="saved-list-url"
+                    bind:value={savedListUrl}
+                    class="zen-url-input"
+                    placeholder="https://maps.app.goo.gl/..."
+                    type="url"
+                  />
+                  <button
+                    type="button"
+                    class="zen-primary-button"
+                    disabled={importingSavedList}
+                    onclick={importSavedList}
+                  >
+                    {importingSavedList ? 'Importing' : 'Import'}
+                  </button>
+                </div>
+
+                {#if savedImportStatus}
+                  <p class="zen-status-line">{savedImportStatus}</p>
+                {/if}
+                {#if savedImportError}
+                  <p class="zen-error-line">{savedImportError}</p>
+                {/if}
+
+                <div class="zen-imported-lists">
+                  {#each savedLists as list}
+                    <div class="zen-list-row">
+                      <div class="min-w-0">
+                        <strong>{list.title}</strong>
+                        <span>{list.places.length} places</span>
+                      </div>
+                      <button type="button" class="zen-quiet-button" onclick={() => removeSavedList(list.id)}>
+                        Remove
+                      </button>
+                    </div>
+                  {:else}
+                    <div class="zen-empty-inline">No Maps list imported yet.</div>
+                  {/each}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        {/if}
       </section>
 
       <section class="zen-weather-board">
@@ -1019,28 +1048,30 @@
               </div>
             </div>
 
-            <div class="zen-source-columns">
+            <div class="zen-bucket-list">
               {#each placeColumns as source}
-                <div class="zen-source-column">
-                  <div class="zen-source-column__head">
+                <section class="zen-bucket-group">
+                  <div class="zen-bucket-group__head">
                     <strong>{sourceLabel(source)}</strong>
                     <span>{placesBySource(source).length}</span>
                   </div>
-                  <div class="zen-source-column__body">
+                  <div class="zen-bucket-rows">
                     {#each placesBySource(source) as place}
                       <button
                         type="button"
-                        class={`zen-source-place ${place.id === activePlace?.id ? 'zen-source-place--active' : ''}`}
+                        class={`zen-bucket-row ${place.id === activePlace?.id ? 'zen-bucket-row--active' : ''}`}
                         onclick={() => selectPlace(place.id)}
                       >
                         <span class={`zen-source-dot zen-source-dot--${place.kind}`}></span>
                         <span>{place.label}</span>
+                        <small>{typeLabelForPlace(place)}</small>
+                        <span class={`zen-resolve-dot ${resolvedForPlace(place) ? 'zen-resolve-dot--live' : ''}`}></span>
                       </button>
                     {:else}
                       <span class="zen-muted-small">Nothing here.</span>
                     {/each}
                   </div>
-                </div>
+                </section>
               {/each}
             </div>
           </article>
@@ -1203,115 +1234,162 @@
               {/each}
             </div>
 
-            <article class="zen-map-inspector">
+            <article class="zen-selected-dock">
               {#if activeSavedPlace}
-                <div class="zen-inspector-head">
-                  <div>
-                    <span>{kindLabel(activeSavedPlace)}</span>
-                    <h3>{activeSavedPlace.label}</h3>
-                    <p>
-                      {typeLabelForPlace(activeSavedPlace)} /
-                      {activeSavedPlace.proximity === 'stay' && activeSavedPlace.stayPlaceLabel
-                        ? `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.stayPlaceLabel}`
-                        : `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.nearestPlaceLabel}`}
-                    </p>
-                  </div>
-                  <span class={`zen-source-dot zen-source-dot--saved-${activeSavedPlace.category}`}></span>
+                <div class="zen-selected-dock__copy">
+                  <span>{kindLabel(activeSavedPlace)}</span>
+                  <strong>{activeSavedPlace.label}</strong>
+                  <small>
+                    {typeLabelForPlace(activeSavedPlace)} /
+                    {activeSavedPlace.proximity === 'stay' && activeSavedPlace.stayPlaceLabel
+                      ? `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.stayPlaceLabel}`
+                      : `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.nearestPlaceLabel}`}
+                  </small>
                 </div>
-
-                {#if activeSavedPlace.address}
-                  <p class="zen-inspector-copy">{activeSavedPlace.address}</p>
-                {/if}
-                {#if activeSavedPlace.note}
-                  <p class="zen-inspector-copy">{activeSavedPlace.note}</p>
-                {/if}
-
-                <div class="zen-token-row">
-                  <span>{activeSavedPlace.listTitle}</span>
-                  <span>{effortLabel(activeSavedPlace.distanceMeters)}</span>
-                </div>
-
-                <a class="zen-primary-button" href={mapSearchUrl(activeSavedPlace)} target="_blank" rel="noreferrer">
-                  Open in Maps
-                </a>
-              {:else if activePlace}
-                <div class="zen-inspector-head">
-                  <div>
-                    <span>{kindLabel(activePlace)}</span>
-                    <h3>{activePlace.label}</h3>
-                    <p>{typeLabelForPlace(activePlace)} / {activeResolvedPlace?.resolvedLabel ?? activePlace.query}</p>
-                  </div>
-                  <span class={`zen-source-dot zen-source-dot--${activePlace.kind}`}></span>
-                </div>
-
-                {#if activePlace.detail}
-                  <p class="zen-inspector-copy">{activePlace.detail}</p>
-                {/if}
-
-                <div class="zen-token-row">
-                  {#each activePlace.sourceColumns as source}
-                    <span>{sourceLabel(source)}</span>
-                  {/each}
-                </div>
-
-                <div class="zen-action-row">
-                  <a class="zen-primary-button" href={mapSearchUrl(activePlace)} target="_blank" rel="noreferrer">
-                    Open in Maps
+                <div class="zen-selected-dock__actions">
+                  <a class="zen-primary-button" href={mapSearchUrl(activeSavedPlace)} target="_blank" rel="noreferrer">
+                    Maps
                   </a>
-                  {#if activePlace.sourceUrl}
-                    <a class="zen-quiet-button" href={activePlace.sourceUrl} target="_blank" rel="noreferrer">
-                      Source
-                    </a>
-                  {/if}
+                  <button type="button" class="zen-quiet-button" onclick={() => (mapDetailsOpen = true)}>
+                    Details
+                  </button>
                 </div>
-              {/if}
-
-              {#if activePlaceEnrichment}
-                <div class="zen-enrichment-box">
-                  <div class="zen-token-row">
-                    <span>{googlePlaceTypeLabel(activePlaceEnrichment.primaryType)}</span>
-                    {#if shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
-                      <span>{shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}</span>
-                    {/if}
-                  </div>
-
-                  {#if activePlaceEnrichment.history}
-                    <div class="zen-history-note">
-                      <span>{activePlaceEnrichment.history.era}</span>
-                      <strong>{activePlaceEnrichment.history.headline}</strong>
-                      <p>{activePlaceEnrichment.history.context}</p>
-                    </div>
-                  {/if}
-
-                  <label class="zen-note-label" for="enrichment-note">
-                    <span>My layer</span>
-                    <small>{enrichmentStorageLabel}</small>
-                  </label>
-                  <textarea
-                    id="enrichment-note"
-                    bind:value={enrichmentDraft}
-                    class="zen-note-box"
-                    placeholder="Add booking notes, food targets, or packing reminders."
-                  ></textarea>
-                  <div class="zen-action-row">
-                    <button
-                      type="button"
-                      class="zen-primary-button"
-                      disabled={enrichmentSaving}
-                      onclick={saveActiveEnrichmentNote}
-                    >
-                      {enrichmentSaving ? 'Saving' : 'Save note'}
-                    </button>
-                    {#if enrichmentStatus}
-                      <span class="zen-status-line">{enrichmentStatus}</span>
-                    {/if}
-                    {#if enrichmentError}
-                      <span class="zen-error-line">{enrichmentError}</span>
-                    {/if}
-                  </div>
+              {:else if activePlace}
+                <div class="zen-selected-dock__copy">
+                  <span>{kindLabel(activePlace)}</span>
+                  <strong>{activePlace.label}</strong>
+                  <small>{typeLabelForPlace(activePlace)} / {activeResolvedPlace?.resolvedLabel ?? activePlace.query}</small>
+                </div>
+                <div class="zen-selected-dock__actions">
+                  <a class="zen-primary-button" href={mapSearchUrl(activePlace)} target="_blank" rel="noreferrer">
+                    Maps
+                  </a>
+                  <button type="button" class="zen-quiet-button" onclick={() => (mapDetailsOpen = true)}>
+                    Details
+                  </button>
                 </div>
               {/if}
             </article>
+
+            {#if mapDetailsOpen}
+              <article class="zen-map-inspector">
+                <div class="zen-drawer-top">
+                  <span class="zen-kicker">Details</span>
+                  <button type="button" class="zen-quiet-button" onclick={() => (mapDetailsOpen = false)}>
+                    Hide
+                  </button>
+                </div>
+
+                {#if activeSavedPlace}
+                  <div class="zen-inspector-head">
+                    <div>
+                      <span>{kindLabel(activeSavedPlace)}</span>
+                      <h3>{activeSavedPlace.label}</h3>
+                      <p>
+                        {typeLabelForPlace(activeSavedPlace)} /
+                        {activeSavedPlace.proximity === 'stay' && activeSavedPlace.stayPlaceLabel
+                          ? `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.stayPlaceLabel}`
+                          : `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.nearestPlaceLabel}`}
+                      </p>
+                    </div>
+                    <span class={`zen-source-dot zen-source-dot--saved-${activeSavedPlace.category}`}></span>
+                  </div>
+
+                  {#if activeSavedPlace.address}
+                    <p class="zen-inspector-copy">{activeSavedPlace.address}</p>
+                  {/if}
+                  {#if activeSavedPlace.note}
+                    <p class="zen-inspector-copy">{activeSavedPlace.note}</p>
+                  {/if}
+
+                  <div class="zen-token-row">
+                    <span>{activeSavedPlace.listTitle}</span>
+                    <span>{effortLabel(activeSavedPlace.distanceMeters)}</span>
+                  </div>
+
+                  <a class="zen-primary-button" href={mapSearchUrl(activeSavedPlace)} target="_blank" rel="noreferrer">
+                    Open in Maps
+                  </a>
+                {:else if activePlace}
+                  <div class="zen-inspector-head">
+                    <div>
+                      <span>{kindLabel(activePlace)}</span>
+                      <h3>{activePlace.label}</h3>
+                      <p>{typeLabelForPlace(activePlace)} / {activeResolvedPlace?.resolvedLabel ?? activePlace.query}</p>
+                    </div>
+                    <span class={`zen-source-dot zen-source-dot--${activePlace.kind}`}></span>
+                  </div>
+
+                  {#if activePlace.detail}
+                    <p class="zen-inspector-copy">{activePlace.detail}</p>
+                  {/if}
+
+                  <div class="zen-token-row">
+                    {#each activePlace.sourceColumns as source}
+                      <span>{sourceLabel(source)}</span>
+                    {/each}
+                  </div>
+
+                  <div class="zen-action-row">
+                    <a class="zen-primary-button" href={mapSearchUrl(activePlace)} target="_blank" rel="noreferrer">
+                      Open in Maps
+                    </a>
+                    {#if activePlace.sourceUrl}
+                      <a class="zen-quiet-button" href={activePlace.sourceUrl} target="_blank" rel="noreferrer">
+                        Source
+                      </a>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if activePlaceEnrichment}
+                  <div class="zen-enrichment-box">
+                    <div class="zen-token-row">
+                      <span>{googlePlaceTypeLabel(activePlaceEnrichment.primaryType)}</span>
+                      {#if shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
+                        <span>{shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}</span>
+                      {/if}
+                    </div>
+
+                    {#if activePlaceEnrichment.history}
+                      <div class="zen-history-note">
+                        <span>{activePlaceEnrichment.history.era}</span>
+                        <strong>{activePlaceEnrichment.history.headline}</strong>
+                        <p>{activePlaceEnrichment.history.context}</p>
+                      </div>
+                    {/if}
+
+                    <label class="zen-note-label" for="enrichment-note">
+                      <span>My layer</span>
+                      <small>{enrichmentStorageLabel}</small>
+                    </label>
+                    <textarea
+                      id="enrichment-note"
+                      bind:value={enrichmentDraft}
+                      class="zen-note-box"
+                      placeholder="Add booking notes, food targets, or packing reminders."
+                    ></textarea>
+                    <div class="zen-action-row">
+                      <button
+                        type="button"
+                        class="zen-primary-button"
+                        disabled={enrichmentSaving}
+                        onclick={saveActiveEnrichmentNote}
+                      >
+                        {enrichmentSaving ? 'Saving' : 'Save note'}
+                      </button>
+                      {#if enrichmentStatus}
+                        <span class="zen-status-line">{enrichmentStatus}</span>
+                      {/if}
+                      {#if enrichmentError}
+                        <span class="zen-error-line">{enrichmentError}</span>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+              </article>
+            {/if}
+
           </div>
         {/if}
       </section>

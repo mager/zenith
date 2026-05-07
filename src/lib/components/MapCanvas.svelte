@@ -348,8 +348,12 @@
       map.on('load', () => {
         if (!map) return;
 
-        if (map.getLayer('Water')) {
-          map.setPaintProperty('Water', 'fill-color', 'rgb(216 229 237)');
+        try {
+          if (map.getLayer('Water')) {
+            map.setPaintProperty('Water', 'fill-color', 'rgb(216 229 237)');
+          }
+        } catch {
+          // The hosted base style can change layer availability during boot; the tint is decorative.
         }
 
         fitMap(places);
