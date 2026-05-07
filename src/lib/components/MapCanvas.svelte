@@ -348,7 +348,9 @@
       map.on('load', () => {
         if (!map) return;
 
-        map.setPaintProperty('Water', 'fill-color', '#d8e5ed');
+        if (map.getLayer('Water')) {
+          map.setPaintProperty('Water', 'fill-color', 'rgb(216 229 237)');
+        }
 
         fitMap(places);
       });

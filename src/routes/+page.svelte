@@ -15,6 +15,14 @@
     googlePlaceTypeLabel,
     isFoodPlaceType
   } from '$lib/place-taxonomy';
+  import { formatInches, formatPercent, formatTemp } from '$lib/weather';
+  import type {
+    CityWeather,
+    DailyWeather,
+    ItineraryDayWeather,
+    TripWeatherResponse,
+    WeatherTone
+  } from '$lib/weather';
   import { sampleCsv } from '$lib/sample-itinerary';
   import { SAVED_PLACE_CATEGORIES, savedCategoryLabel } from '$lib/saved-places';
   import type {
@@ -31,7 +39,6 @@
     SavedPlaceCategory
   } from '$lib/types';
 
-  type DetailPanel = 'csv' | 'maps' | null;
   type MapLens = 'smart' | 'stay' | 'food' | 'history';
 
   const EXAMPLE_SAVED_LIST_URL = 'https://maps.app.goo.gl/zZdZRFg5A3CamwaaA';
@@ -55,11 +62,9 @@
   let activeDayId = $state(initialDays[0]?.id ?? '');
   let activePlaceId = $state(initialDays[0]?.places[0]?.id ?? '');
   let loadError = $state('');
-  let uploadName = $state('Japan 2026 itinerary');
   let resolvedByDay = $state<Record<string, ResolvedPlace[]>>({});
   let resolutionErrors = $state<Record<string, string>>({});
   let loadingDayIds = $state<Record<string, boolean>>({});
-  let activePanel = $state<DetailPanel>(null);
   let mapLens = $state<MapLens>('smart');
   let savedListUrl = $state(EXAMPLE_SAVED_LIST_URL);
   let savedLists = $state<SavedMapList[]>([]);
@@ -74,6 +79,12 @@
   let enrichmentSaving = $state(false);
   let enrichmentStatus = $state('');
   let enrichmentError = $state('');
+  let weatherCities = $state<CityWeather[]>([]);
+  let weatherByDayId = $state<Record<string, ItineraryDayWeather>>({});
+  let weatherLoading = $state(false);
+  let weatherError = $state('');
+  let weatherFetchedAt = $state('');
+  let weatherRequestRun = 0;
 
   function normalizeCsv(text: string): ItineraryDay[] {
     const parsed = Papa.parse<Record<string, string>>(text, {
@@ -138,6 +149,18 @@
               : ''
           }`
   );
+  let tripCities = $derived(
+    Array.from(new Set(days.map((day) => day.city.trim()).filter(Boolean)))
+  );
+  let totalItineraryPlaces = $derived(days.reduce((total, day) => total + day.places.length, 0));
+  let totalItineraryFoods = $derived(days.reduce((total, day) => total + day.foods.length, 0));
+  let totalItineraryStays = $derived(days.reduce((total, day) => total + day.hotelPlaces.length, 0));
+  let activeCityWeather = $derived(activeDay ? weatherForCity(activeDay.city) : undefined);
+  let activeDayWeather = $derived(activeDay ? weatherByDayId[activeDay.id] : undefined);
+  let activeDailyWeather = $derived(activeDayWeather?.forecast);
+  let activeWeatherTone = $derived<WeatherTone>(
+    activeDailyWeather?.tone ?? activeCityWeather?.current?.tone ?? 'cloud'
+  );
 
   async function resolvePlaces(day: ItineraryDay) {
     if (resolvedByDay[day.id] || loadingDayIds[day.id]) return;
@@ -199,13 +222,20 @@
 
   function selectDay(dayId: string) {
     activeDayId = dayId;
-    activePanel = null;
 
     const nextDay = days.find((day) => day.id === dayId);
     activePlaceId = nextDay?.places[0]?.id ?? '';
 
     if (nextDay) {
       void resolvePlaces(nextDay);
+    }
+  }
+
+  function selectCity(city: string) {
+    const nextDay = days.find((day) => normalizedCityKey(day.city) === normalizedCityKey(city));
+
+    if (nextDay) {
+      selectDay(nextDay.id);
     }
   }
 
@@ -216,7 +246,6 @@
     resolvedByDay = {};
     resolutionErrors = {};
     loadingDayIds = {};
-    activePanel = null;
     loadError = parsedDays.length ? '' : 'No itinerary rows found in that CSV.';
 
     if (parsedDays[0]) {
@@ -224,18 +253,117 @@
     }
   }
 
-  async function onUpload(event: Event) {
-    const target = event.currentTarget as HTMLInputElement;
-    const file = target.files?.[0];
-    if (!file) return;
-
-    uploadName = file.name;
-    rawCsv = await file.text();
+  function pasteCsv() {
     resetItinerary(normalizeCsv(rawCsv));
   }
 
-  function pasteCsv() {
-    resetItinerary(normalizeCsv(rawCsv));
+  function normalizedCityKey(city: string): string {
+    return city.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function weatherForCity(city: string): CityWeather | undefined {
+    const key = normalizedCityKey(city);
+
+    return weatherCities.find((weatherCity) => normalizedCityKey(weatherCity.city) === key);
+  }
+
+  function weatherForDay(day: ItineraryDay): ItineraryDayWeather | undefined {
+    return weatherByDayId[day.id];
+  }
+
+  function dailyWeatherForDay(day: ItineraryDay): DailyWeather | undefined {
+    return weatherForDay(day)?.forecast;
+  }
+
+  function weatherToneClass(tone: WeatherTone | undefined): string {
+    return `zen-weather-tone--${tone ?? 'cloud'}`;
+  }
+
+  function weatherTempRange(dayWeather: DailyWeather | undefined): string {
+    if (!dayWeather) return 'Live current';
+
+    return `${formatTemp(dayWeather.highF)} / ${formatTemp(dayWeather.lowF)}`;
+  }
+
+  function dayWeatherLine(day: ItineraryDay): string {
+    const dayWeather = weatherForDay(day);
+    const forecast = dayWeather?.forecast;
+    const cityWeather = weatherForCity(day.city);
+
+    if (forecast) {
+      return `${forecast.summary}, ${weatherTempRange(forecast)}`;
+    }
+
+    if (cityWeather?.current) {
+      return `${cityWeather.current.summary}, now ${formatTemp(cityWeather.current.temperatureF)}`;
+    }
+
+    return weatherLoading ? 'Weather loading' : 'Weather unavailable';
+  }
+
+  function weatherUpdatedLabel(): string {
+    if (!weatherFetchedAt) return 'Live weather';
+
+    return new Date(weatherFetchedAt).toLocaleTimeString([], {
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }
+
+  async function loadTripWeather(nextDays: ItineraryDay[]) {
+    const run = (weatherRequestRun += 1);
+
+    if (!nextDays.length) {
+      weatherCities = [];
+      weatherByDayId = {};
+      weatherError = '';
+      weatherFetchedAt = '';
+      return;
+    }
+
+    weatherLoading = true;
+    weatherError = '';
+
+    try {
+      const response = await fetch('/api/weather', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          days: nextDays.map((day) => ({
+            id: day.id,
+            city: day.city,
+            date: day.date
+          }))
+        })
+      });
+      const payload = (await response.json()) as TripWeatherResponse | { message?: string };
+
+      if (!response.ok || !('cities' in payload)) {
+        const message = 'message' in payload ? payload.message : undefined;
+
+        throw new Error(message ?? 'Weather lookup failed.');
+      }
+
+      if (run !== weatherRequestRun) return;
+
+      weatherCities = payload.cities;
+      weatherByDayId = Object.fromEntries(payload.days.map((day) => [day.dayId, day]));
+      weatherFetchedAt = payload.fetchedAt;
+    } catch (error) {
+      if (run !== weatherRequestRun) return;
+
+      weatherError = error instanceof Error ? error.message : 'Weather lookup failed.';
+    } finally {
+      if (run === weatherRequestRun) {
+        weatherLoading = false;
+      }
+    }
+  }
+
+  function refreshWeather() {
+    void loadTripWeather(days);
   }
 
   function radians(value: number): number {
@@ -480,7 +608,6 @@
 
   function useExampleMap() {
     savedListUrl = EXAMPLE_SAVED_LIST_URL;
-    activePanel = 'maps';
     savedImportError = '';
     savedImportStatus = 'Ready to import your example Japan map.';
   }
@@ -550,6 +677,14 @@
     return 'Explore';
   }
 
+  function mapPlaceKindLabel(place: MapPlace): string {
+    if (place.kind === 'saved') return savedCategoryLabel(place.savedCategory ?? 'other');
+    if (place.kind === 'food') return 'Eat';
+    if (place.kind === 'hotel') return 'Stay';
+
+    return 'Explore';
+  }
+
   function sourceLabel(source: PlaceSource | string): string {
     if (source === 'Must Eats') return 'Eats';
     if (source === 'Hotel') return 'Stay';
@@ -595,6 +730,12 @@
   });
 
   $effect(() => {
+    const nextDays = days.map((day) => day);
+
+    void loadTripWeather(nextDays);
+  });
+
+  $effect(() => {
     if (!savedStorageReady) return;
 
     localStorage.setItem(SAVED_LISTS_STORAGE_KEY, JSON.stringify(savedLists));
@@ -622,502 +763,270 @@
   <title>Zen | Travel Planner</title>
   <meta
     name="description"
-    content="Zen turns a CSV itinerary into a map-first, high-clarity travel dashboard."
+    content="Zen turns a pasted itinerary and Google Maps link into a live weather, place, and map planner."
   />
 </svelte:head>
 
 <div class="zen-shell min-h-screen">
-  <div class="zen-page-frame mx-auto grid min-h-screen gap-4 px-3 py-3 lg:grid-cols-[22rem_minmax(0,1fr)] lg:px-4 lg:py-4">
-    <aside class="zen-sidebar min-h-0 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
-      <section class="zen-panel flex h-full min-h-0 flex-col rounded-lg">
-        <div class="border-b border-[var(--line)] p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-soft)]">
-                Zen
-              </p>
-              <h1 class="mt-2 text-[1.28rem] font-semibold leading-tight">Japan map planner</h1>
-              <p class="mt-2 text-[13px] leading-5 text-[var(--text-muted)]">
-                Paste a trip. Get the day on a map.
-              </p>
-            </div>
-            <div class="shrink-0 rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-2.5 py-2 text-right">
-              <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-soft)]">Days</div>
-              <div class="mt-1 text-[1rem] font-semibold">{days.length}</div>
-            </div>
+  <div class="zen-page-frame zen-workbench mx-auto min-h-screen px-3 py-3 lg:px-4 lg:py-4">
+    <main class="zen-planner-scroll">
+      <header class="zen-trip-header">
+        <div class="min-w-0">
+          <div class="zen-kicker">Zen day planner</div>
+          <h1>Japan, at a glance</h1>
+          <p>{days.length} days, {tripCities.length} cities, {totalItineraryPlaces} extracted places.</p>
+        </div>
+
+        <div class="zen-trip-metrics" aria-label="Trip totals">
+          <div>
+            <span>Days</span>
+            <strong>{days.length}</strong>
           </div>
-
-          <div class="mt-4 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
-            <label
-              class="inline-flex flex-1 cursor-pointer items-center justify-center rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2.5 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)]"
-            >
-              Upload CSV
-              <input class="hidden" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onchange={onUpload} />
-            </label>
-            <button
-              type="button"
-              class="inline-flex items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2.5 text-[12px] font-semibold transition hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]"
-              onclick={() => (activePanel = activePanel === 'csv' ? null : 'csv')}
-            >
-              CSV
-            </button>
-            <button
-              type="button"
-              class={`inline-flex items-center justify-center rounded-md border px-3 py-2.5 text-[12px] font-semibold transition ${
-                activePanel === 'maps'
-                  ? 'border-[var(--line-strong)] bg-[var(--text-main)] text-[var(--panel-strong)]'
-                  : 'border-[var(--line)] bg-[var(--panel-strong)] hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]'
-              }`}
-              onclick={() => (activePanel = activePanel === 'maps' ? null : 'maps')}
-            >
-              Maps
-            </button>
+          <div>
+            <span>Eats</span>
+            <strong>{totalItineraryFoods}</strong>
           </div>
-          <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
-            <span class="min-w-0 truncate">{uploadName}</span>
-            <span class="shrink-0">{savedPlaces.length} saved</span>
+          <div>
+            <span>Stays</span>
+            <strong>{totalItineraryStays}</strong>
           </div>
+          <div>
+            <span>Saved</span>
+            <strong>{savedPlaces.length}</strong>
+          </div>
+        </div>
+      </header>
 
-          {#if activePanel === 'csv'}
-            <div class="mt-4">
-              <textarea
-                bind:value={rawCsv}
-                class="zen-code h-[16rem] w-full rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-3 text-[12px] leading-6 text-[var(--text-main)]"
-              ></textarea>
-              <button
-                type="button"
-                class="mt-3 rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)]"
-                onclick={pasteCsv}
-              >
-                Rebuild map
-              </button>
-              {#if loadError}
-                <p class="mt-3 text-[12px] text-[var(--accent-coral)]">{loadError}</p>
-              {/if}
+      <section class="zen-input-deck" aria-label="Planner inputs">
+        <div class="zen-input-block zen-input-block--csv">
+          <div class="zen-section-head">
+            <div>
+              <span class="zen-kicker">Input 1</span>
+              <h2>CSV itinerary</h2>
             </div>
-          {/if}
-
-          {#if activePanel === 'maps'}
-            <div class="mt-4">
-              <div class="flex items-center justify-between gap-3">
-                <label class="block text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]" for="saved-list-url">
-                  Google Maps List
-                </label>
-                <button
-                  type="button"
-                  class="rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)] transition hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]"
-                  onclick={useExampleMap}
-                >
-                  Use example
-                </button>
-              </div>
-              <div class="mt-2 flex gap-2">
-                <input
-                  id="saved-list-url"
-                  bind:value={savedListUrl}
-                  class="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2.5 text-[12px] text-[var(--text-main)] outline-none transition focus:border-[var(--line-strong)]"
-                  placeholder="https://maps.app.goo.gl/..."
-                  type="url"
-                />
-                <button
-                  type="button"
-                  class="rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={importingSavedList}
-                  onclick={importSavedList}
-                >
-                  {importingSavedList ? 'Adding' : 'Add'}
-                </button>
-              </div>
-              <p class="mt-2 text-[11px] leading-4 text-[var(--text-soft)]">
-                The example link is prefilled, and imported lists stay on this machine.
-              </p>
-
-              {#if savedImportStatus}
-                <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{savedImportStatus}</p>
-              {/if}
-              {#if savedImportError}
-                <p class="mt-2 text-[12px] leading-5 text-[var(--accent-coral)]">{savedImportError}</p>
-              {/if}
-
-              <div class="mt-3 grid gap-2">
-                {#each savedLists as list}
-                  <div class="zen-list-row rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2">
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="min-w-0">
-                        <div class="truncate text-[12px] font-semibold">{list.title}</div>
-                        <div class="mt-0.5 text-[11px] text-[var(--text-muted)]">{list.places.length} saved places</div>
-                      </div>
-                      <button
-                        type="button"
-                        class="rounded-md border border-[var(--line)] px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)] transition hover:border-[var(--line-strong)] hover:bg-[var(--panel-strong)]"
-                        onclick={() => removeSavedList(list.id)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                {:else}
-                  <p class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                    Paste a shared Maps list to color-code saved places against each day.
-                  </p>
-                {/each}
-              </div>
-            </div>
+            <button type="button" class="zen-primary-button" onclick={pasteCsv}>Rebuild planner</button>
+          </div>
+          <textarea
+            bind:value={rawCsv}
+            class="zen-code zen-csv-box"
+            spellcheck="false"
+            aria-label="CSV itinerary paste area"
+          ></textarea>
+          {#if loadError}
+            <p class="zen-error-line">{loadError}</p>
           {/if}
         </div>
 
-        <div class="flex min-h-0 flex-1 flex-col p-3">
-          <div class="flex items-center justify-between px-1 pb-2">
-            <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
-              Days
-            </h2>
-            <span class="text-[11px] text-[var(--text-muted)]">{activeDay?.city ?? 'No day'}</span>
+        <div class="zen-input-block zen-input-block--maps">
+          <div class="zen-section-head">
+            <div>
+              <span class="zen-kicker">Input 2</span>
+              <h2>Google Maps link</h2>
+            </div>
+            <button type="button" class="zen-quiet-button" onclick={useExampleMap}>Example</button>
+          </div>
+          <div class="zen-map-import-row">
+            <input
+              id="saved-list-url"
+              bind:value={savedListUrl}
+              class="zen-url-input"
+              placeholder="https://maps.app.goo.gl/..."
+              type="url"
+            />
+            <button
+              type="button"
+              class="zen-primary-button"
+              disabled={importingSavedList}
+              onclick={importSavedList}
+            >
+              {importingSavedList ? 'Importing' : 'Import'}
+            </button>
           </div>
 
-          <div class="grid min-h-0 flex-1 gap-1.5 overflow-auto pr-1">
-            {#each days as day}
-              <button
-                type="button"
-                class={`zen-day-row ${day.id === activeDay?.id ? 'zen-day-row--active' : ''}`}
-                onclick={() => selectDay(day.id)}
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="flex min-w-0 items-center gap-2">
-                      <span class="shrink-0 text-[12px] font-semibold">Day {day.dayNumber}</span>
-                      <span class="truncate text-[11px] uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                        {day.weekday}, {day.date}
-                      </span>
-                    </div>
-                    <div class="mt-1 truncate text-[14px] font-semibold">{day.city}</div>
-                  </div>
-                  <div class="shrink-0 rounded-full border border-[var(--line)] bg-[var(--bg-0)] px-2 py-0.5 text-[11px] text-[var(--text-muted)]">
-                    {day.places.length}
-                  </div>
+          {#if savedImportStatus}
+            <p class="zen-status-line">{savedImportStatus}</p>
+          {/if}
+          {#if savedImportError}
+            <p class="zen-error-line">{savedImportError}</p>
+          {/if}
+
+          <div class="zen-imported-lists">
+            {#each savedLists as list}
+              <div class="zen-list-row">
+                <div class="min-w-0">
+                  <strong>{list.title}</strong>
+                  <span>{list.places.length} places</span>
                 </div>
-                <div class="mt-2 line-clamp-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                  {day.theme}
-                </div>
-                <div class="mt-2 truncate text-[11px] text-[var(--text-soft)]">{daySummary(day)}</div>
-              </button>
+                <button type="button" class="zen-quiet-button" onclick={() => removeSavedList(list.id)}>
+                  Remove
+                </button>
+              </div>
+            {:else}
+              <div class="zen-empty-inline">No Maps list imported yet.</div>
             {/each}
           </div>
         </div>
       </section>
-    </aside>
 
-    <main class="flex min-w-0 flex-col gap-4">
+      <section class="zen-weather-board">
+        <div class="zen-section-head">
+          <div>
+            <span class="zen-kicker">Live packing layer</span>
+            <h2>Weather in every city</h2>
+          </div>
+          <button type="button" class="zen-quiet-button" disabled={weatherLoading} onclick={refreshWeather}>
+            {weatherLoading ? 'Refreshing' : weatherUpdatedLabel()}
+          </button>
+        </div>
+
+        {#if weatherError}
+          <p class="zen-error-line">{weatherError}</p>
+        {/if}
+
+        <div class="zen-city-weather-grid">
+          {#each tripCities as city}
+            {@const cityWeather = weatherForCity(city)}
+            {@const cityCurrent = cityWeather?.current}
+            <button
+              type="button"
+              class={`zen-city-weather ${activeDay?.city === city ? 'zen-city-weather--active' : ''} ${weatherToneClass(cityCurrent?.tone)}`}
+              onclick={() => selectCity(city)}
+            >
+              <span class="zen-weather-dot"></span>
+              <span class="zen-city-weather__name">{city}</span>
+              <strong>{formatTemp(cityCurrent?.temperatureF)}</strong>
+              <span>{cityCurrent?.summary ?? (weatherLoading ? 'Loading' : 'No live data')}</span>
+              {#if cityWeather?.packingNotes.length}
+                <small>{cityWeather.packingNotes.join(', ')}</small>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </section>
+
+      <section class="zen-day-strip" aria-label="Itinerary days">
+        {#each days as day}
+          {@const dayWeather = dailyWeatherForDay(day)}
+          <button
+            type="button"
+            class={`zen-day-ticket ${day.id === activeDay?.id ? 'zen-day-ticket--active' : ''} ${weatherToneClass(dayWeather?.tone ?? weatherForCity(day.city)?.current?.tone)}`}
+            onclick={() => selectDay(day.id)}
+          >
+            <span class="zen-day-ticket__number">Day {day.dayNumber}</span>
+            <strong>{day.city}</strong>
+            <span>{day.weekday} {day.date}</span>
+            <small>{dayWeatherLine(day)}</small>
+          </button>
+        {/each}
+      </section>
+
       {#if activeDay}
-        <section class="zen-map-stage relative min-h-[78vh] overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--bg-2)] shadow-[var(--shadow-panel)] lg:min-h-[calc(100vh-2rem)]">
-          <div class="absolute inset-0">
-            <MapCanvas
-              places={activeMapPlaces}
-              activePlaceId={activeFocusPlace?.id ?? ''}
-              onSelectPlace={selectPlace}
-            />
-          </div>
-
-          <div class="zen-map-fade zen-map-fade--top pointer-events-none absolute inset-x-0 top-0 h-40"></div>
-          <div class="zen-map-fade zen-map-fade--bottom pointer-events-none absolute inset-x-0 bottom-0 h-56"></div>
-
-          <div class="pointer-events-none absolute left-3 right-3 top-3 z-10 sm:left-4 sm:right-4">
-            <div class="zen-map-title pointer-events-auto max-w-full rounded-lg border border-[var(--line)] bg-[var(--panel-strong)]/94 px-4 py-3 shadow-[var(--shadow-panel)] backdrop-blur">
-              <div class="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                <span>Day {activeDay.dayNumber}</span>
-                <span>{activeDay.date}</span>
-                <span>{activeDay.weekday}</span>
-                <span>{mapCaption}</span>
-              </div>
-              <div class="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
-                <h2 class="text-[1.65rem] font-semibold leading-none">{activeDay.city}</h2>
-                <p class="max-w-[48rem] text-[13px] leading-5 text-[var(--text-muted)]">{activeDay.theme}</p>
-              </div>
-              {#if activeHotel}
-                <button
-                  type="button"
-                  class="zen-stay-link mt-3 inline-flex max-w-full items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-muted)]"
-                  onclick={() => selectPlace(activeHotel.id)}
-                >
-                  <span class="zen-source-dot zen-source-dot--hotel"></span>
-                  <span class="truncate">Tonight: {activeHotel.label}</span>
-                </button>
-              {/if}
-              <div class="mt-3 flex flex-wrap gap-2">
-                {#each mapLensOptions as option}
-                  <button
-                    type="button"
-                    class={`zen-map-chip ${mapLens === option.id ? 'zen-map-chip--active' : ''}`}
-                    onclick={() => (mapLens = option.id)}
-                  >
-                    {option.label}
-                  </button>
-                {/each}
-              </div>
-              {#if activeDayNarrative.historyStops.length || activeDayNarrative.savedHistoryCount}
-                <div class="zen-story-strip mt-3">
-                  <div class="min-w-0">
-                    <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                      Story Thread
-                    </div>
-                    <p class="mt-1 text-[13px] font-semibold leading-5">{activeDayNarrative.headline}</p>
-                    <p class="mt-1 max-w-[54rem] text-[12px] leading-5 text-[var(--text-muted)]">
-                      {activeDayNarrative.summary}
-                    </p>
-                  </div>
-                  {#if activeDayNarrative.themes.length}
-                    <div class="zen-story-themes">
-                      {#each activeDayNarrative.themes as theme}
-                        <span>{theme}</span>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
+        <section class="zen-glance-grid">
+          <article class={`zen-day-glance ${weatherToneClass(activeWeatherTone)}`}>
+            <div class="zen-day-glance__copy">
+              <span class="zen-kicker">Day {activeDay.dayNumber} / {activeDay.weekday} {activeDay.date}</span>
+              <h2>{activeDay.city}</h2>
+              <p>{activeDay.theme}</p>
+              {#if activeDay.transportation}
+                <div class="zen-transit-pill">{activeDay.transportation}</div>
               {/if}
             </div>
-          </div>
 
-          {#if activeFocusPlace}
-            <div class="pointer-events-none absolute bottom-3 left-3 right-3 z-10 grid gap-3 xl:grid-cols-[minmax(0,1fr)_23rem]">
-              <div class="pointer-events-auto min-w-0 self-end rounded-lg border border-[var(--line)] bg-[var(--panel-strong)]/94 p-2 shadow-[var(--shadow-panel)] backdrop-blur">
-                <div class="zen-place-rail flex gap-2 overflow-x-auto pb-1">
-                  {#each activePlaces as place}
-                    <button
-                      type="button"
-                      class={`zen-place-pill ${place.id === activeFocusPlace.id ? 'zen-place-pill--active' : ''}`}
-                      onclick={() => selectPlace(place.id)}
-                    >
-                      <span class={`zen-source-dot zen-source-dot--${place.kind}`}></span>
-                      <span class="zen-place-pill__order">{kindLabel(place)}</span>
-                      <span class="zen-place-pill__text">{place.label}</span>
-                      <span
-                        class={`zen-resolve-dot ${resolvedForPlace(place) ? 'zen-resolve-dot--live' : ''}`}
-                      ></span>
-                    </button>
-                  {/each}
-                </div>
+            <div class="zen-weather-now">
+              <span>{activeDailyWeather?.summary ?? activeCityWeather?.current?.summary ?? 'Weather'}</span>
+              <strong>
+                {activeDailyWeather
+                  ? weatherTempRange(activeDailyWeather)
+                  : formatTemp(activeCityWeather?.current?.temperatureF)}
+              </strong>
+              <div>
+                <span>Rain {formatPercent(activeDailyWeather?.precipitationProbability)}</span>
+                <span>Wind {activeDailyWeather?.windMph ? `${Math.round(activeDailyWeather.windMph)} mph` : 'n/a'}</span>
+                <span>UV {activeDailyWeather?.uvIndex ? Math.round(activeDailyWeather.uvIndex) : 'n/a'}</span>
               </div>
-
-              <article class="pointer-events-auto rounded-lg border border-[var(--line)] bg-[var(--panel-strong)]/96 p-4 shadow-[var(--shadow-panel)] backdrop-blur">
-                {#if activeSavedPlace}
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                        {kindLabel(activeSavedPlace)}
-                      </div>
-                      <h3 class="mt-1 text-[1.12rem] font-semibold leading-tight">{activeSavedPlace.label}</h3>
-                      <p class="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
-                        {typeLabelForPlace(activeSavedPlace)} /
-                        {activeSavedPlace.proximity === 'stay' && activeSavedPlace.stayPlaceLabel
-                          ? `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.stayPlaceLabel}`
-                          : `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.nearestPlaceLabel}`}
-                      </p>
-                    </div>
-                    <span class={`zen-source-dot zen-source-dot--saved-${activeSavedPlace.category} mt-1`}></span>
-                  </div>
-
-                  {#if activeSavedPlace.address}
-                    <p class="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">{activeSavedPlace.address}</p>
-                  {/if}
-                  {#if activeSavedPlace.note}
-                    <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{activeSavedPlace.note}</p>
-                  {/if}
-
-                  <div class="mt-3 flex flex-wrap gap-1.5">
-                    <span class="rounded-full border border-[var(--line)] bg-[var(--bg-0)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-                      {activeSavedPlace.listTitle}
-                    </span>
-                    <span class="rounded-full border border-[var(--line)] bg-[var(--bg-0)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-                      {effortLabel(activeSavedPlace.distanceMeters)}
-                    </span>
-                  </div>
-
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <a
-                      class="inline-flex items-center justify-center rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)]"
-                      href={mapSearchUrl(activeSavedPlace)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open map
-                    </a>
-                  </div>
-                {:else if activePlace}
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                        {kindLabel(activePlace)}
-                      </div>
-                      <h3 class="mt-1 text-[1.12rem] font-semibold leading-tight">{activePlace.label}</h3>
-                      <p class="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
-                        {typeLabelForPlace(activePlace)} / {activeResolvedPlace?.resolvedLabel ?? activePlace.query}
-                      </p>
-                    </div>
-                    <span class={`zen-source-dot zen-source-dot--${activePlace.kind} mt-1`}></span>
-                  </div>
-
-                  {#if activePlace.detail}
-                    <p class="mt-3 text-[12px] leading-5 text-[var(--text-muted)]">{activePlace.detail}</p>
-                  {/if}
-
-                  <div class="mt-3 flex flex-wrap gap-1.5">
-                    {#each activePlace.sourceColumns as source}
-                      <span class="rounded-full border border-[var(--line)] bg-[var(--bg-0)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-                        {sourceLabel(source)}
-                      </span>
-                    {/each}
-                  </div>
-
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <a
-                      class="inline-flex items-center justify-center rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)]"
-                      href={mapSearchUrl(activePlace)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open map
-                    </a>
-                    {#if activePlace.sourceUrl}
-                      <a
-                        class="inline-flex items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-strong)] px-3 py-2 text-[12px] font-semibold text-[var(--text-main)] transition hover:border-[var(--line-strong)] hover:bg-[var(--bg-0)]"
-                        href={activePlace.sourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Source link
-                      </a>
-                    {/if}
-                  </div>
-                {/if}
-
-                {#if activePlaceEnrichment}
-                  <div class="zen-enrichment-box mt-4">
-                    <div class="flex flex-wrap items-center gap-1.5">
-                      <span class="zen-type-token">{googlePlaceTypeLabel(activePlaceEnrichment.primaryType)}</span>
-                      {#if shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
-                        <span class="text-[11px] leading-4 text-[var(--text-soft)]">
-                          {shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
-                        </span>
-                      {/if}
-                    </div>
-
-                    {#if activePlaceEnrichment.history}
-                      <div class="mt-3 border-t border-[var(--line)] pt-3">
-                        <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                          History
-                        </div>
-                        <h4 class="mt-1 text-[0.94rem] font-semibold leading-tight">
-                          {activePlaceEnrichment.history.headline}
-                        </h4>
-                        <p class="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-                          {activePlaceEnrichment.history.era}
-                        </p>
-                        <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                          {activePlaceEnrichment.history.context}
-                        </p>
-                        <p class="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                          {activePlaceEnrichment.history.whyVisit}
-                        </p>
-                        {#if activePlaceEnrichment.history.visitCue}
-                          <p class="mt-2 text-[12px] leading-5 text-[var(--text-main)]">
-                            {activePlaceEnrichment.history.visitCue}
-                          </p>
-                        {/if}
-                      </div>
-                    {/if}
-
-                    <div class="mt-3 border-t border-[var(--line)] pt-3">
-                      <div class="flex items-center justify-between gap-3">
-                        <label class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]" for="enrichment-note">
-                          My layer
-                        </label>
-                        <span class="text-[10px] text-[var(--text-soft)]">{enrichmentStorageLabel}</span>
-                      </div>
-                      <textarea
-                        id="enrichment-note"
-                        bind:value={enrichmentDraft}
-                        class="mt-2 h-20 w-full resize-none rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2 text-[12px] leading-5 text-[var(--text-main)]"
-                        placeholder="Add why this matters, booking notes, or a history angle to research later."
-                      ></textarea>
-                      <div class="mt-2 flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          class="rounded-md border border-[var(--line-strong)] bg-[var(--text-main)] px-3 py-2 text-[12px] font-semibold text-[var(--panel-strong)] transition hover:bg-[var(--ink-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={enrichmentSaving}
-                          onclick={saveActiveEnrichmentNote}
-                        >
-                          {enrichmentSaving ? 'Saving' : 'Save note'}
-                        </button>
-                        {#if enrichmentStatus}
-                          <span class="text-[11px] text-[var(--text-muted)]">{enrichmentStatus}</span>
-                        {/if}
-                        {#if enrichmentError}
-                          <span class="text-[11px] text-[var(--accent-coral)]">{enrichmentError}</span>
-                        {/if}
-                      </div>
-                    </div>
-                  </div>
-                {/if}
-              </article>
+              {#if activeDayWeather?.message}
+                <small>{activeDayWeather.message}</small>
+              {/if}
             </div>
-          {/if}
+          </article>
+
+          <aside class="zen-pack-panel">
+            <div class="zen-section-head">
+              <div>
+                <span class="zen-kicker">Pack for {activeDay.city}</span>
+                <h2>Bring this</h2>
+              </div>
+            </div>
+            <div class="zen-pack-list">
+              {#each activeCityWeather?.packingNotes ?? [] as note}
+                <span>{note}</span>
+              {:else}
+                <span>Check layers</span>
+                <span>Comfortable shoes</span>
+              {/each}
+            </div>
+            <dl class="zen-weather-dl">
+              <div>
+                <dt>Current</dt>
+                <dd>{formatTemp(activeCityWeather?.current?.temperatureF)} feels {formatTemp(activeCityWeather?.current?.apparentTemperatureF)}</dd>
+              </div>
+              <div>
+                <dt>Humidity</dt>
+                <dd>{formatPercent(activeCityWeather?.current?.relativeHumidity)}</dd>
+              </div>
+              <div>
+                <dt>Precip</dt>
+                <dd>{formatInches(activeDailyWeather?.precipitationIn ?? activeCityWeather?.current?.precipitationIn)}</dd>
+              </div>
+            </dl>
+          </aside>
         </section>
 
-        <section class="zen-panel rounded-lg p-4">
-          <div class="flex items-center justify-between border-b border-[var(--line)] px-1 pb-3">
-            <h3 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-soft)]">
-              Day Places
-            </h3>
-            <span class="text-[11px] text-[var(--text-muted)]">{activePlaces.length} pins</span>
-          </div>
-
-          <section class="zen-history-thread mt-3">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <h4 class="text-[12px] font-semibold">{activeDayNarrative.headline}</h4>
-                <p class="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">
-                  {activeDayNarrative.summary}
-                </p>
+        <section class="zen-planning-grid">
+          <article class="zen-route-board">
+            <div class="zen-section-head">
+              <div>
+                <span class="zen-kicker">Day at a glance</span>
+                <h2>Route rhythm</h2>
               </div>
-              <button
-                type="button"
-                class={`shrink-0 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold transition ${
-                  mapLens === 'history'
-                    ? 'border-[var(--line-strong)] bg-[var(--text-main)] text-[var(--panel-strong)]'
-                    : 'border-[var(--line)] bg-[var(--bg-0)] text-[var(--text-muted)] hover:border-[var(--line-strong)] hover:bg-[var(--panel-strong)]'
-                }`}
-                onclick={() => (mapLens = 'history')}
-              >
-                History lens
-              </button>
+              <span class="zen-mini-stat">{mapCaption}</span>
             </div>
 
-            {#if activeDayNarrative.historyStops.length}
-              <div class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {#each activeDayNarrative.historyStops.slice(0, 6) as stop}
-                  <button
-                    type="button"
-                    class="zen-history-stop"
-                    onclick={() => selectPlace(activePlaces.find((place) => enrichmentKeyForPlace(place) === stop.id)?.id ?? '')}
-                  >
-                    <span class="text-[11px] font-semibold">{stop.label}</span>
-                    <span class="mt-1 line-clamp-2 text-[11px] leading-4 text-[var(--text-muted)]">
-                      {stop.history?.headline}
-                    </span>
-                  </button>
-                {/each}
-              </div>
-            {/if}
-          </section>
+            <div class="zen-route-list">
+              {#each activePlaces as place}
+                <button
+                  type="button"
+                  class={`zen-route-stop ${place.id === activePlace?.id ? 'zen-route-stop--active' : ''}`}
+                  onclick={() => selectPlace(place.id)}
+                >
+                  <span class={`zen-source-dot zen-source-dot--${place.kind}`}></span>
+                  <span class="zen-route-stop__order">{place.order}</span>
+                  <span class="zen-route-stop__label">{place.label}</span>
+                  <span class="zen-route-stop__meta">{kindLabel(place)} / {typeLabelForPlace(place)}</span>
+                  <span class={`zen-resolve-dot ${resolvedForPlace(place) ? 'zen-resolve-dot--live' : ''}`}></span>
+                </button>
+              {:else}
+                <div class="zen-empty-inline">No places found for this day.</div>
+              {/each}
+            </div>
+          </article>
 
-          <div class="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_27rem]">
-            <div class="grid gap-3 xl:grid-cols-3">
+          <article class="zen-category-board">
+            <div class="zen-section-head">
+              <div>
+                <span class="zen-kicker">Extracted from CSV</span>
+                <h2>Place buckets</h2>
+              </div>
+            </div>
+
+            <div class="zen-source-columns">
               {#each placeColumns as source}
-                <section class="zen-source-band rounded-lg border border-[var(--line)] bg-[var(--panel-strong)] p-3">
-                  <div class="flex items-center justify-between gap-3">
-                    <h4 class="text-[12px] font-semibold">{sourceLabel(source)}</h4>
-                    <span class="text-[11px] text-[var(--text-muted)]">{placesBySource(source).length}</span>
+                <div class="zen-source-column">
+                  <div class="zen-source-column__head">
+                    <strong>{sourceLabel(source)}</strong>
+                    <span>{placesBySource(source).length}</span>
                   </div>
-                  <div class="mt-2 flex flex-wrap gap-2">
+                  <div class="zen-source-column__body">
                     {#each placesBySource(source) as place}
                       <button
                         type="button"
@@ -1128,97 +1037,284 @@
                         <span>{place.label}</span>
                       </button>
                     {:else}
-                      <span class="text-[12px] text-[var(--text-soft)]">Nothing in this column.</span>
+                      <span class="zen-muted-small">Nothing here.</span>
                     {/each}
                   </div>
-                </section>
+                </div>
+              {/each}
+            </div>
+          </article>
+
+          <article class="zen-saved-board">
+            <div class="zen-section-head">
+              <div>
+                <span class="zen-kicker">Near route and stay</span>
+                <h2>Saved places</h2>
+              </div>
+              <span class="zen-mini-stat">{activeLensSavedPlaces.length} shown</span>
+            </div>
+
+            {#if easyNextPlaces.length}
+              <div class="zen-easy-next">
+                <strong>Easy next</strong>
+                <div>
+                  {#each easyNextPlaces as place}
+                    <button
+                      type="button"
+                      class={`zen-saved-suggestion ${place.id === activeSavedPlace?.id ? 'zen-saved-suggestion--active' : ''}`}
+                      onclick={() => selectPlace(place.id)}
+                    >
+                      <span class={`zen-source-dot zen-source-dot--saved-${place.category}`}></span>
+                      <span>{place.label}</span>
+                      <small>{formatDistance(place.distanceMeters)}</small>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <div class="zen-saved-categories">
+              {#each SAVED_PLACE_CATEGORIES as category}
+                {@const categoryPlaces = savedPlacesByCategory(category)}
+                {#if categoryPlaces.length}
+                  <section>
+                    <div>
+                      <span class={`zen-source-dot zen-source-dot--saved-${category}`}></span>
+                      <strong>{savedCategoryLabel(category)}</strong>
+                      <span>{categoryPlaces.length}</span>
+                    </div>
+                    <div>
+                      {#each categoryPlaces.slice(0, 10) as place}
+                        <button
+                          type="button"
+                          class={`zen-source-place ${place.id === activeSavedPlace?.id ? 'zen-source-place--active' : ''}`}
+                          onclick={() => selectPlace(place.id)}
+                        >
+                          <span>{place.label}</span>
+                          <small>{formatDistance(place.distanceMeters)}</small>
+                        </button>
+                      {/each}
+                    </div>
+                  </section>
+                {/if}
+              {/each}
+              {#if !activeLensSavedPlaces.length}
+                <div class="zen-empty-inline">
+                  {savedLists.length ? 'No saved pins match this day and lens.' : 'Import the Maps link to unlock saved pins.'}
+                </div>
+              {/if}
+            </div>
+          </article>
+
+          <article class="zen-story-board">
+            <div class="zen-section-head">
+              <div>
+                <span class="zen-kicker">Context</span>
+                <h2>{activeDayNarrative.headline}</h2>
+              </div>
+              <button
+                type="button"
+                class={`zen-quiet-button ${mapLens === 'history' ? 'zen-quiet-button--active' : ''}`}
+                onclick={() => (mapLens = 'history')}
+              >
+                History lens
+              </button>
+            </div>
+            <p>{activeDayNarrative.summary}</p>
+
+            {#if activeDayNarrative.themes.length}
+              <div class="zen-story-themes">
+                {#each activeDayNarrative.themes as theme}
+                  <span>{theme}</span>
+                {/each}
+              </div>
+            {/if}
+
+            {#if activeDayNarrative.historyStops.length}
+              <div class="zen-history-mini-grid">
+                {#each activeDayNarrative.historyStops.slice(0, 6) as stop}
+                  <button
+                    type="button"
+                    class="zen-history-stop"
+                    onclick={() => selectPlace(activePlaces.find((place) => enrichmentKeyForPlace(place) === stop.id)?.id ?? '')}
+                  >
+                    <span>{stop.label}</span>
+                    <small>{stop.history?.headline}</small>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </article>
+        </section>
+      {:else}
+        <section class="zen-panel zen-empty-state">
+          Paste itinerary rows to begin.
+        </section>
+      {/if}
+    </main>
+
+    <aside class="zen-map-dock">
+      <section class="zen-map-frame">
+        <div class="zen-map-stage absolute inset-0">
+          <MapCanvas
+            places={activeMapPlaces}
+            activePlaceId={activeFocusPlace?.id ?? ''}
+            onSelectPlace={selectPlace}
+          />
+        </div>
+
+        <div class="zen-map-fade zen-map-fade--top pointer-events-none absolute inset-x-0 top-0 h-40"></div>
+        <div class="zen-map-fade zen-map-fade--bottom pointer-events-none absolute inset-x-0 bottom-0 h-56"></div>
+
+        {#if activeDay}
+          <div class="zen-map-toolbar">
+            <div class="min-w-0">
+              <span>Day {activeDay.dayNumber} / {activeDay.city}</span>
+              <strong>{activeDay.theme}</strong>
+              <small>{mapCaption}</small>
+            </div>
+            <div class="zen-map-lenses">
+              {#each mapLensOptions as option}
+                <button
+                  type="button"
+                  class={`zen-map-chip ${mapLens === option.id ? 'zen-map-chip--active' : ''}`}
+                  onclick={() => (mapLens = option.id)}
+                >
+                  {option.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if activeFocusPlace}
+          <div class="zen-map-bottom">
+            <div class="zen-place-rail">
+              {#each activeMapPlaces as place}
+                <button
+                  type="button"
+                  class={`zen-place-pill ${place.id === activeFocusPlace.id ? 'zen-place-pill--active' : ''}`}
+                  onclick={() => selectPlace(place.id)}
+                >
+                  <span class={`zen-source-dot zen-source-dot--${place.kind === 'saved' ? `saved-${place.savedCategory ?? 'other'}` : place.kind}`}></span>
+                  <span class="zen-place-pill__order">{mapPlaceKindLabel(place)}</span>
+                  <span class="zen-place-pill__text">{place.label}</span>
+                </button>
               {/each}
             </div>
 
-            <section class="zen-nearby-saved rounded-lg border border-[var(--line)] bg-[var(--panel-strong)] p-3">
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <h4 class="text-[12px] font-semibold">Nearby Saved</h4>
-                  <p class="mt-1 text-[11px] text-[var(--text-muted)]">
-                    {activeLensSavedPlaces.length
-                      ? `${activeLensSavedPlaces.length} shown in ${mapLensLabel(mapLens).toLowerCase()} lens`
-                      : savedLists.length
-                        ? 'No saved pins match this lens yet'
-                        : 'Add a Maps list to unlock this'}
-                  </p>
+            <article class="zen-map-inspector">
+              {#if activeSavedPlace}
+                <div class="zen-inspector-head">
+                  <div>
+                    <span>{kindLabel(activeSavedPlace)}</span>
+                    <h3>{activeSavedPlace.label}</h3>
+                    <p>
+                      {typeLabelForPlace(activeSavedPlace)} /
+                      {activeSavedPlace.proximity === 'stay' && activeSavedPlace.stayPlaceLabel
+                        ? `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.stayPlaceLabel}`
+                        : `${formatDistance(activeSavedPlace.distanceMeters)} from ${activeSavedPlace.nearestPlaceLabel}`}
+                    </p>
+                  </div>
+                  <span class={`zen-source-dot zen-source-dot--saved-${activeSavedPlace.category}`}></span>
                 </div>
-                <button
-                  type="button"
-                  class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-muted)] transition hover:border-[var(--line-strong)] hover:bg-[var(--panel-strong)]"
-                  onclick={() => (activePanel = 'maps')}
-                >
-                  Lists
-                </button>
-              </div>
 
-              {#if easyNextPlaces.length}
-                <div class="mt-3 rounded-md border border-[var(--line)] bg-[var(--bg-0)] p-2.5">
-                  <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-                    Low Energy Next
+                {#if activeSavedPlace.address}
+                  <p class="zen-inspector-copy">{activeSavedPlace.address}</p>
+                {/if}
+                {#if activeSavedPlace.note}
+                  <p class="zen-inspector-copy">{activeSavedPlace.note}</p>
+                {/if}
+
+                <div class="zen-token-row">
+                  <span>{activeSavedPlace.listTitle}</span>
+                  <span>{effortLabel(activeSavedPlace.distanceMeters)}</span>
+                </div>
+
+                <a class="zen-primary-button" href={mapSearchUrl(activeSavedPlace)} target="_blank" rel="noreferrer">
+                  Open in Maps
+                </a>
+              {:else if activePlace}
+                <div class="zen-inspector-head">
+                  <div>
+                    <span>{kindLabel(activePlace)}</span>
+                    <h3>{activePlace.label}</h3>
+                    <p>{typeLabelForPlace(activePlace)} / {activeResolvedPlace?.resolvedLabel ?? activePlace.query}</p>
                   </div>
-                  <div class="mt-2 grid gap-1.5">
-                    {#each easyNextPlaces as place}
-                      <button
-                        type="button"
-                        class={`zen-saved-suggestion ${place.id === activeSavedPlace?.id ? 'zen-saved-suggestion--active' : ''}`}
-                        onclick={() => selectPlace(place.id)}
-                      >
-                        <span class={`zen-source-dot zen-source-dot--saved-${place.category}`}></span>
-                        <span class="min-w-0 flex-1 truncate">{place.label}</span>
-                        <span>{place.proximity === 'stay' ? 'stay' : formatDistance(place.distanceMeters)}</span>
-                      </button>
-                    {/each}
-                  </div>
+                  <span class={`zen-source-dot zen-source-dot--${activePlace.kind}`}></span>
+                </div>
+
+                {#if activePlace.detail}
+                  <p class="zen-inspector-copy">{activePlace.detail}</p>
+                {/if}
+
+                <div class="zen-token-row">
+                  {#each activePlace.sourceColumns as source}
+                    <span>{sourceLabel(source)}</span>
+                  {/each}
+                </div>
+
+                <div class="zen-action-row">
+                  <a class="zen-primary-button" href={mapSearchUrl(activePlace)} target="_blank" rel="noreferrer">
+                    Open in Maps
+                  </a>
+                  {#if activePlace.sourceUrl}
+                    <a class="zen-quiet-button" href={activePlace.sourceUrl} target="_blank" rel="noreferrer">
+                      Source
+                    </a>
+                  {/if}
                 </div>
               {/if}
 
-              <div class="mt-3 grid gap-3">
-                {#each SAVED_PLACE_CATEGORIES as category}
-                  {@const categoryPlaces = savedPlacesByCategory(category)}
-                  {#if categoryPlaces.length}
-                    <div>
-                      <div class="mb-1.5 flex items-center justify-between gap-3">
-                        <div class="flex items-center gap-2">
-                          <span class={`zen-source-dot zen-source-dot--saved-${category}`}></span>
-                          <span class="text-[11px] font-semibold">{savedCategoryLabel(category)}</span>
-                        </div>
-                        <span class="text-[11px] text-[var(--text-muted)]">{categoryPlaces.length}</span>
-                      </div>
-                      <div class="flex flex-wrap gap-2">
-                        {#each categoryPlaces.slice(0, 8) as place}
-                          <button
-                            type="button"
-                            class={`zen-source-place ${place.id === activeSavedPlace?.id ? 'zen-source-place--active' : ''}`}
-                            onclick={() => selectPlace(place.id)}
-                          >
-                            <span>{place.label}</span>
-                            <span class="text-[10px] text-[var(--text-soft)]">{formatDistance(place.distanceMeters)}</span>
-                          </button>
-                        {/each}
-                      </div>
+              {#if activePlaceEnrichment}
+                <div class="zen-enrichment-box">
+                  <div class="zen-token-row">
+                    <span>{googlePlaceTypeLabel(activePlaceEnrichment.primaryType)}</span>
+                    {#if shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}
+                      <span>{shortPlaceTypes(activePlaceEnrichment.googlePlaceTypes)}</span>
+                    {/if}
+                  </div>
+
+                  {#if activePlaceEnrichment.history}
+                    <div class="zen-history-note">
+                      <span>{activePlaceEnrichment.history.era}</span>
+                      <strong>{activePlaceEnrichment.history.headline}</strong>
+                      <p>{activePlaceEnrichment.history.context}</p>
                     </div>
                   {/if}
-                {/each}
 
-                {#if !activeLensSavedPlaces.length}
-                  <p class="rounded-md border border-[var(--line)] bg-[var(--bg-0)] px-3 py-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                    Saved places appear here when they match the active lens and are close to today's route or hotel.
-                  </p>
-                {/if}
-              </div>
-            </section>
+                  <label class="zen-note-label" for="enrichment-note">
+                    <span>My layer</span>
+                    <small>{enrichmentStorageLabel}</small>
+                  </label>
+                  <textarea
+                    id="enrichment-note"
+                    bind:value={enrichmentDraft}
+                    class="zen-note-box"
+                    placeholder="Add booking notes, food targets, or packing reminders."
+                  ></textarea>
+                  <div class="zen-action-row">
+                    <button
+                      type="button"
+                      class="zen-primary-button"
+                      disabled={enrichmentSaving}
+                      onclick={saveActiveEnrichmentNote}
+                    >
+                      {enrichmentSaving ? 'Saving' : 'Save note'}
+                    </button>
+                    {#if enrichmentStatus}
+                      <span class="zen-status-line">{enrichmentStatus}</span>
+                    {/if}
+                    {#if enrichmentError}
+                      <span class="zen-error-line">{enrichmentError}</span>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </article>
           </div>
-        </section>
-      {:else}
-        <div class="zen-panel flex flex-1 items-center justify-center rounded-lg px-6 text-center text-[var(--text-muted)]">
-          Upload or paste a CSV to begin.
-        </div>
-      {/if}
-    </main>
+        {/if}
+      </section>
+    </aside>
   </div>
 </div>
